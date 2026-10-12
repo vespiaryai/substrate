@@ -109,15 +109,15 @@ func ValidateCSIDriver(driver string) error {
 	return nil
 }
 
-// CheckCSIDriver is ValidateCSIDriver plus the part that needs the resolved
-// configuration: the hostpath driver exists only for Kind.
-//
-// DeployAteSystem calls it before it installs anything, so that
-// `--setup-csi=hostpath` against a cluster that is not Kind is refused up front
-// rather than after a full control-plane install.
 func (e *Env) CheckCSIDriver(driver string) error {
 	if err := ValidateCSIDriver(driver); err != nil {
 		return err
+	}
+	if e.Cfg.K3s != nil {
+		if csiDrivers[driver].nfs {
+			return fmt.Errorf("k3s profile supports hostpath or none, not the demo NFS server")
+		}
+		return nil
 	}
 	if csiDrivers[driver].hostpath {
 		return e.RequireKind("csi-hostpath")
@@ -125,9 +125,6 @@ func (e *Env) CheckCSIDriver(driver string) error {
 	return nil
 }
 
-// SetupCSI installs the hostpath and NFS CSI drivers used by external volume
-// demos. The hostpath driver is Kind only: it is patched for the single-node
-// Kind layout and reaches into the node container over docker.
 func (e *Env) SetupCSI(ctx context.Context, driver string) error {
 	log.Step("setup_csi")
 
@@ -147,6 +144,9 @@ func (e *Env) SetupCSI(ctx context.Context, driver string) error {
 		return nil
 	}
 
+	if err := e.PreflightK3s(ctx, true); err != nil {
+		return err
+	}
 	if err := e.ensureCSIPrerequisites(ctx); err != nil {
 		return err
 	}
@@ -185,6 +185,9 @@ func (e *Env) ensureCSIPrerequisites(ctx context.Context) error {
 
 func (e *Env) setupCSIHostpath(ctx context.Context) error {
 	log.Step("setup_csi_hostpath")
+	if e.Cfg.K3s != nil {
+		return e.setupK3sHostpath(ctx)
+	}
 
 	driverDir := e.Cfg.Path("hack", "third_party", "csi-driver-host-path")
 	deployDir := driverDir + "/deploy"

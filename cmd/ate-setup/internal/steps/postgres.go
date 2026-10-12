@@ -141,10 +141,9 @@ func (e *Env) deployPostgres(ctx context.Context, plan postgresPlan) error {
 }
 
 // postgresManifestPath is the bundled PostgreSQL manifest for the environment:
-// the kind overlay trims the StatefulSet to a laptop, the base file is sized
-// for a real node.
+// the Kind sizing overlay also bounds the single-node k3s database.
 func (e *Env) postgresManifestPath() string {
-	if e.Cfg.Kind {
+	if e.Cfg.Kind || e.Cfg.K3s != nil {
 		return e.Cfg.Manifest("kind", "postgres")
 	}
 	return e.Cfg.Manifest("postgres", "postgres.yaml")

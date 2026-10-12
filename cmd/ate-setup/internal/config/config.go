@@ -88,6 +88,8 @@ type Config struct {
 	// Kind selects the local Kind install profile (ATE_INSTALL_KIND).
 	Kind bool
 
+	K3s *K3sProfile
+
 	// Namespace is the namespace the control plane is installed into, from
 	// ATE_NAMESPACE. It defaults to the canonical installdefaults.SystemNamespace,
 	// so an install that does not set it is unaffected. The checked-in manifests

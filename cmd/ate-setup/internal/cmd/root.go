@@ -116,7 +116,7 @@ is present (skipped for --kind, and by NO_DEV_ENV=1).`,
 		if err != nil {
 			return err
 		}
-		return nil
+		return env.PreflightK3s(cmd.Context(), false)
 	},
 	// The bare command has no Run: cobra prints the help text and exits, and
 	// because the command is not runnable, PersistentPreRunE never fires. No

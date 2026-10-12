@@ -52,6 +52,8 @@ const cordonControlPlaneComponent = installDir + "/components/cordon-control-pla
 // steps.
 func SystemOverlay(cfg *config.Config) string {
 	switch {
+	case cfg.K3s != nil:
+		return installDir + "/k3s"
 	case cfg.Router == config.RouterAgentgateway && cfg.Kind:
 		return installDir + "/kind-agentgateway"
 	case cfg.Router == config.RouterAgentgateway:
@@ -418,6 +420,9 @@ func (e *Env) applyAtenetEgress(ctx context.Context, provider config.CredentialP
 // right copy themselves: applying the base file on a kind cluster would
 // overwrite it with the GKE endpoint and break telemetry everywhere at once.
 func (e *Env) otelConfigPath() string {
+	if e.Cfg.K3s != nil {
+		return e.Cfg.Manifest("k3s", "ate-otel-config.yaml")
+	}
 	if e.Cfg.Kind {
 		return e.Cfg.Manifest("kind", "ate-otel-config.yaml")
 	}
