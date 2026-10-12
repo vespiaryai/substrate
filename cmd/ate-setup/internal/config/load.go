@@ -68,7 +68,7 @@ func LoadFlags(fs *pflag.FlagSet, o LoadOptions) (*Config, error) {
 	}
 
 	kind := resolveKind(fs, file, env)
-	if err := mergeDevEnv(root, env, o.NoDevEnv, kind); err != nil {
+	if err := mergeDevEnv(root, env, o.NoDevEnv, kind || resolveK3s(fs, file, env)); err != nil {
 		return nil, err
 	}
 
@@ -101,7 +101,11 @@ func configPathFrom(o LoadOptions) string {
 // make a document that selects Kind still source .ate-dev-env.sh, pointing a
 // local install at the GKE project the file names.
 func resolveKind(fs *pflag.FlagSet, file *File, env map[string]string) bool {
-	s, ok := Lookup(kindEnabledKey)
+	return resolveProfile(fs, file, env, kindEnabledKey)
+}
+
+func resolveProfile(fs *pflag.FlagSet, file *File, env map[string]string, key string) bool {
+	s, ok := Lookup(key)
 	if !ok {
 		return false
 	}
@@ -116,8 +120,6 @@ func resolveKind(fs *pflag.FlagSet, file *File, env map[string]string) bool {
 	}
 
 	if fs != nil && fs.Changed(s.Flag) {
-		// Read even when false: --kind=false is a deliberate override of an
-		// inherited variable, not an absence.
 		if b, err := fs.GetBool(s.Flag); err == nil {
 			return b
 		}
@@ -254,6 +256,22 @@ func buildConfig(root string, env map[string]string, r *Resolved) (*Config, erro
 		resolved:                       r,
 	}
 
+	if r.Bool("k3s.enabled") {
+		cfg.K3s = &K3sProfile{
+			Node:                  r.String("k3s.node"),
+			NodeUID:               r.String("k3s.nodeUID"),
+			SystemUID:             r.String("k3s.systemUID"),
+			KubeletRoot:           r.String("k3s.kubeletRoot"),
+			S3Endpoint:            r.String("k3s.s3Endpoint"),
+			S3Region:              r.String("k3s.s3Region"),
+			S3Secret:              r.String("k3s.s3Secret"),
+			SnapshotController:    r.String("k3s.snapshotController"),
+			SnapshotControllerUID: r.String("k3s.snapshotControllerUID"),
+		}
+		if err := cfg.ValidateK3s(); err != nil {
+			return nil, err
+		}
+	}
 	if err := validateResolved(cfg, r); err != nil {
 		return nil, err
 	}
@@ -389,4 +407,8 @@ func validateResolved(cfg *Config, r *Resolved) error {
 		}
 	}
 	return nil
+}
+
+func resolveK3s(fs *pflag.FlagSet, file *File, env map[string]string) bool {
+	return resolveProfile(fs, file, env, "k3s.enabled")
 }
