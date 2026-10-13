@@ -206,12 +206,20 @@ func (e *Env) ResolveManifest(ctx context.Context, path string) ([]byte, error) 
 	if err != nil {
 		return nil, err
 	}
-	return resolver.ResolvePath(ctx, path)
+	manifest, err := resolver.ResolvePath(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	return e.configureK3sManifest(manifest)
 }
 
 // ResolveManifestBytes resolves an in-memory manifest, such as kustomize output.
 func (e *Env) ResolveManifestBytes(ctx context.Context, manifest []byte) ([]byte, error) {
 	resolver, err := e.imageResolver()
+	if err != nil {
+		return nil, err
+	}
+	manifest, err = e.configureK3sManifest(manifest)
 	if err != nil {
 		return nil, err
 	}

@@ -61,7 +61,8 @@ import (
 )
 
 var (
-	podUID = pflag.String("pod-uid", "", "The UID of the current pod")
+	gvisorProfileFlag = pflag.String("gvisor-profile", "", "gVisor profile: default or systrap-20260831-v1")
+	podUID            = pflag.String("pod-uid", "", "The UID of the current pod")
 
 	tunnelConfig = ateomtunnel.RegisterFlags(pflag.CommandLine)
 
@@ -103,6 +104,10 @@ func main() {
 }
 
 func do(ctx context.Context) error {
+	profile, err := parseGvisorProfile(*gvisorProfileFlag)
+	if err != nil {
+		return err
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -211,6 +216,7 @@ func do(ctx context.Context) error {
 		return err
 	}
 	ateomService := NewService(tunnel, actorLogger, *maxActors)
+	ateomService.profile = profile
 
 	svr := grpc.NewServer(
 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
@@ -279,6 +285,7 @@ type workloadSession struct {
 
 // AteomService is a service for shepherding single microvm.
 type AteomService struct {
+	profile gvisorProfile
 	ateompb.UnimplementedAteomServer
 
 	// Serializes lifecycle RPCs per actor.
@@ -519,6 +526,9 @@ func (s *AteomService) RunWorkload(ctx context.Context, req *ateompb.RunWorkload
 	if err := validateActorDirs(req.GetActorDirs()); err != nil {
 		return nil, err
 	}
+	if err := s.profile.validateRunscPath(req.GetRunscPath()); err != nil {
+		return nil, err
+	}
 	if err := validateRunscPath(req.GetRunscPath()); err != nil {
 		return nil, err
 	}
@@ -558,6 +568,7 @@ func (s *AteomService) RunWorkload(ctx context.Context, req *ateompb.RunWorkload
 		return nil, err
 	}
 	rcmd := &runsc{
+		profile:        s.profile,
 		path:           req.GetRunscPath(),
 		actorUID:       req.GetActorUid(),
 		actorDirs:      req.GetActorDirs(),
@@ -640,6 +651,9 @@ func (s *AteomService) RunWorkload(ctx context.Context, req *ateompb.RunWorkload
 // (or the harness) to suspend on shutdown.
 func (s *AteomService) CheckpointWorkload(ctx context.Context, req *ateompb.CheckpointWorkloadRequest) (*ateompb.CheckpointWorkloadResponse, error) {
 	if err := validateActorDirs(req.GetActorDirs()); err != nil {
+		return nil, err
+	}
+	if err := s.profile.validateRunscPath(req.GetRunscPath()); err != nil {
 		return nil, err
 	}
 	if err := validateRunscPath(req.GetRunscPath()); err != nil {
@@ -821,6 +835,9 @@ func (s *AteomService) RestoreWorkload(ctx context.Context, req *ateompb.Restore
 	if err := validateActorDirs(req.GetActorDirs()); err != nil {
 		return nil, err
 	}
+	if err := s.profile.validateRunscPath(req.GetRunscPath()); err != nil {
+		return nil, err
+	}
 	if err := validateRunscPath(req.GetRunscPath()); err != nil {
 		return nil, err
 	}
@@ -860,6 +877,7 @@ func (s *AteomService) RestoreWorkload(ctx context.Context, req *ateompb.Restore
 		return nil, err
 	}
 	rcmd := &runsc{
+		profile:        s.profile,
 		path:           req.GetRunscPath(),
 		actorUID:       req.GetActorUid(),
 		actorDirs:      req.GetActorDirs(),
@@ -971,6 +989,9 @@ func (s *AteomService) RestoreWorkload(ctx context.Context, req *ateompb.Restore
 
 func (s *AteomService) TerminateWorkload(ctx context.Context, req *ateompb.TerminateWorkloadRequest) (*ateompb.TerminateWorkloadResponse, error) {
 	if err := validateActorDirs(req.GetActorDirs()); err != nil {
+		return nil, err
+	}
+	if err := s.profile.validateRunscPath(req.GetRunscPath()); err != nil {
 		return nil, err
 	}
 	if err := validateRunscPath(req.GetRunscPath()); err != nil {

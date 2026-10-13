@@ -82,6 +82,17 @@ var Registry = []Setting{
 		Key: "kindCluster.name", Env: "KIND_CLUSTER_NAME", Flag: "kind-cluster-name", Kind: KindString, Default: "kind",
 		Usage: "Name of the Kind cluster to target",
 	},
+	{Key: "k3s.s3Endpoint", Env: "ATE_K3S_S3_ENDPOINT", Flag: "k3s-s3-endpoint", Kind: KindString, Usage: "HTTPS endpoint for an existing S3 snapshot service"},
+	{Key: "k3s.s3Region", Env: "ATE_K3S_S3_REGION", Flag: "k3s-s3-region", Kind: KindString, Usage: "S3 snapshot service region"},
+	{Key: "k3s.s3Secret", Env: "ATE_K3S_S3_SECRET", Flag: "k3s-s3-secret", Kind: KindString, Usage: "Existing ate-system Secret with AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY"},
+	{Key: "k3s.snapshotController", Env: "ATE_K3S_SNAPSHOT_CONTROLLER", Flag: "k3s-snapshot-controller", Kind: KindString, Usage: "Existing upstream snapshot-controller deployment as namespace/name"},
+	{Key: "k3s.snapshotControllerUID", Env: "ATE_K3S_SNAPSHOT_CONTROLLER_UID", Flag: "k3s-snapshot-controller-uid", Kind: KindString, Usage: "Expected existing snapshot-controller deployment UID"},
+	{Key: "k3s.enabled", Env: "ATE_INSTALL_K3S", Flag: "k3s", Kind: KindBool, Default: "false", Usage: "Target an explicitly bound single-node k3s installation"},
+	{Key: "k3s.node", Env: "ATE_K3S_NODE", Flag: "k3s-node", Kind: KindString, Usage: "Exact k3s node name"},
+	{Key: "k3s.nodeUID", Env: "ATE_K3S_NODE_UID", Flag: "k3s-node-uid", Kind: KindString, Usage: "Expected k3s node UID"},
+	{Key: "k3s.systemUID", Env: "ATE_K3S_SYSTEM_UID", Flag: "k3s-system-uid", Kind: KindString, Usage: "Expected kube-system namespace UID"},
+	{Key: "k3s.kubeletRoot", Env: "ATE_K3S_KUBELET_ROOT", Flag: "k3s-kubelet-root", Kind: KindString, Usage: "Absolute kubelet root on this node"},
+
 	{
 		Key: "namespace", Env: "ATE_NAMESPACE", Flag: "namespace", Kind: KindString,
 		Default: installdefaults.SystemNamespace,

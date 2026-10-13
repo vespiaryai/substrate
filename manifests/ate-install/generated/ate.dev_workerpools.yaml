@@ -105,6 +105,12 @@ spec:
                     - message: annotation keys must be valid Kubernetes qualified
                         names
                       rule: self.all(key, !format.qualifiedName().validate(key).hasValue())
+                  gvisorProfile:
+                    description: GVisorProfile selects a runtime profile for gvisor
+                      workers.
+                    enum:
+                    - systrap-20260831-v1
+                    type: string
                   labels:
                     additionalProperties:
                       description: |-
@@ -451,6 +457,10 @@ spec:
             - replicas
             - workerImage
             type: object
+            x-kubernetes-validations:
+            - message: gvisorProfile requires sandboxClass gvisor
+              rule: '!has(self.template) || !has(self.template.gvisorProfile) || !has(self.sandboxClass)
+                || self.sandboxClass == ''gvisor'''
           status:
             description: status is the observed state of WorkerPool
             properties:

@@ -15,6 +15,7 @@
 package controllers
 
 import (
+	"fmt"
 	"slices"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -143,6 +144,10 @@ func buildDeploymentApplyConfig(wp *atev1alpha1.WorkerPool, otel ateomOTelSettin
 		"--atunnel-egress-listen-address=0.0.0.0:15001",
 		"--atunnel-egress-trust-bundle="+atunnelEgressTrustMountPath+"/trust-bundle.pem",
 	)
+
+	if wp.Spec.Template != nil && wp.Spec.Template.GVisorProfile != nil {
+		args = append(args, "--gvisor-profile="+string(*wp.Spec.Template.GVisorProfile))
+	}
 
 	containerAC := corev1ac.Container().
 		WithName("ateom").
@@ -643,4 +648,17 @@ func nodeSelectorRequirementToApply(req *corev1.NodeSelectorRequirement) *corev1
 		ac.WithValues(req.Values...)
 	}
 	return ac
+}
+
+func validateWorkerPoolGVisorProfile(wp *atev1alpha1.WorkerPool) error {
+	if wp.Spec.Template == nil || wp.Spec.Template.GVisorProfile == nil {
+		return nil
+	}
+	if *wp.Spec.Template.GVisorProfile != atev1alpha1.GVisorProfileSystrap20260831V1 {
+		return fmt.Errorf("unknown gvisorProfile %q", *wp.Spec.Template.GVisorProfile)
+	}
+	if wp.Spec.SandboxClass != "" && wp.Spec.SandboxClass != atev1alpha1.SandboxClassGvisor {
+		return fmt.Errorf("gvisorProfile requires sandboxClass gvisor")
+	}
+	return nil
 }
