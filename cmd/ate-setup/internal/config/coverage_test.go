@@ -27,6 +27,7 @@ var notFromASetting = map[string]bool{
 	"Root":                     true,
 	"Images":                   true, // assembled from images.repo and images.tag
 	"CloudSQL":                 true, // assembled from the ateapi.postgres.cloudsql.* settings
+	"K3s":                      true, // assembled only when k3s.enabled; TestK3sSettingsBuildConfig checks all fields
 	"PostgresOwnerRoleSet":     true,
 	"PostgresReadWriteRoleSet": true,
 
@@ -46,9 +47,9 @@ func TestEveryConfigFieldIsFedBySomeSetting(t *testing.T) {
 	for _, s := range All() {
 		switch s.Kind {
 		case KindBool:
-			// A Kind install clears the GCP coordinates by design, so the
-			// cloud path is the one that exercises every field.
-			env[s.Env] = strconv.FormatBool(s.Key != "kindCluster.enabled")
+			// Local profiles exclude GCP coordinates, so keep both disabled
+			// here to exercise the cloud fields.
+			env[s.Env] = strconv.FormatBool(s.Key != "kindCluster.enabled" && s.Key != "k3s.enabled")
 		case KindInt:
 			env[s.Env] = "7"
 		case KindDuration:

@@ -57,6 +57,29 @@ func TestWorkerPoolValidation(t *testing.T) {
 		mutate:  func(wp *WorkerPool) {},
 		wantErr: false,
 	}, {
+		name: "valid gvisor profile",
+		mutate: func(wp *WorkerPool) {
+			profile := GVisorProfileSystrap20260831V1
+			wp.Spec.Template = &WorkerPoolPodTemplate{GVisorProfile: &profile}
+		},
+	}, {
+		name: "unknown gvisor profile",
+		mutate: func(wp *WorkerPool) {
+			profile := GVisorProfile("unknown")
+			wp.Spec.Template = &WorkerPoolPodTemplate{GVisorProfile: &profile}
+		},
+		wantErr: true,
+		errMsg:  "spec.template.gvisorProfile",
+	}, {
+		name: "gvisor profile rejects microvm",
+		mutate: func(wp *WorkerPool) {
+			profile := GVisorProfileSystrap20260831V1
+			wp.Spec.Template = &WorkerPoolPodTemplate{GVisorProfile: &profile}
+			wp.Spec.SandboxClass = SandboxClassMicroVM
+		},
+		wantErr: true,
+		errMsg:  "gvisorProfile requires sandboxClass gvisor",
+	}, {
 		name: "replicas below minimum",
 		mutate: func(wp *WorkerPool) {
 			wp.Spec.Replicas = -1

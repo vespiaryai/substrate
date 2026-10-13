@@ -1070,3 +1070,37 @@ func TestBuildDeploymentApplyConfigLogsExporter(t *testing.T) {
 		})
 	}
 }
+
+func TestWorkerPoolGVisorProfile(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		profile *atev1alpha1.GVisorProfile
+		class   atev1alpha1.SandboxClass
+		invalid bool
+	}{
+		{name: "default"},
+		{name: "selected", profile: ptr.To(atev1alpha1.GVisorProfileSystrap20260831V1)},
+		{name: "explicit gvisor", profile: ptr.To(atev1alpha1.GVisorProfileSystrap20260831V1), class: atev1alpha1.SandboxClassGvisor},
+		{name: "microvm", profile: ptr.To(atev1alpha1.GVisorProfileSystrap20260831V1), class: atev1alpha1.SandboxClassMicroVM, invalid: true},
+		{name: "unknown", profile: ptr.To(atev1alpha1.GVisorProfile("unknown")), invalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wp := testWorkerPoolApplyConfig(&atev1alpha1.WorkerPoolPodTemplate{GVisorProfile: tc.profile})
+			wp.Spec.SandboxClass = tc.class
+			if err := validateWorkerPoolGVisorProfile(wp); (err != nil) != tc.invalid {
+				t.Fatalf("validation: %v", err)
+			}
+			if tc.invalid {
+				return
+			}
+			got := buildDeploymentApplyConfig(wp, ateomOTelSettings{}, installdefaults.SystemNamespace, installdefaults.AteletServiceAccount, installdefaults.RouterServiceAccount).Spec.Template.Spec.Containers[0].Args
+			want := expectedDeploymentApplyConfig(nil).Spec.Template.Spec.Containers[0].Args
+			if tc.profile != nil {
+				want = append(want, "--gvisor-profile=systrap-20260831-v1")
+			}
+			if diff := cmp.Diff(want, got); diff != "" {
+				t.Fatalf("args (-want +got):\n%s", diff)
+			}
+		})
+	}
+}

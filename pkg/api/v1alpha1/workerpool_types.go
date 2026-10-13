@@ -26,10 +26,20 @@ import (
 // +kubebuilder:validation:Pattern=`^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$`
 type WorkerPoolLabelValue string
 
+// GVisorProfile selects an opt-in gVisor runtime profile.
+// +kubebuilder:validation:Enum=systrap-20260831-v1
+type GVisorProfile string
+
+const GVisorProfileSystrap20260831V1 GVisorProfile = "systrap-20260831-v1"
+
 // WorkerPoolPodTemplate defines optional metadata, scheduling, and resource
 // settings for worker workloads. NodeAffinity is mapped to
 // spec.affinity.nodeAffinity on the pod.
 type WorkerPoolPodTemplate struct {
+	// GVisorProfile selects a runtime profile for gvisor workers.
+	// +optional
+	GVisorProfile *GVisorProfile `json:"gvisorProfile,omitempty"`
+
 	// Labels are added to the generated Deployment and worker pods. Keys in
 	// the ate.dev domain and its subdomains are reserved for controllers.
 	//
@@ -85,6 +95,7 @@ type WorkerPoolPodTemplate struct {
 	ServiceAccountName *string `json:"serviceAccountName,omitempty"`
 }
 
+// +kubebuilder:validation:XValidation:rule="!has(self.template) || !has(self.template.gvisorProfile) || !has(self.sandboxClass) || self.sandboxClass == 'gvisor'",message="gvisorProfile requires sandboxClass gvisor"
 type WorkerPoolSpec struct {
 	// Replicas is the number of worker pods to run.
 	// +required

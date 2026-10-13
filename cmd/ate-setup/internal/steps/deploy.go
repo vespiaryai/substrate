@@ -42,8 +42,6 @@ var ateCRDs = []string{
 
 // DeployOptions carries the per-invocation choices for DeployAteSystem.
 type DeployOptions struct {
-	// SetupCSI additionally installs the CSI driver (nfs, hostpath, both, none).
-	// Kind only. The hostpath driver is Kind only.
 	SetupCSI string
 }
 
@@ -77,6 +75,10 @@ func (e *Env) DeployAteSystem(ctx context.Context, opts DeployOptions) error {
 	// through: a driver this cluster cannot run is worth knowing before the
 	// control plane goes up, not after.
 	if err := e.CheckCSIDriver(opts.SetupCSI); err != nil {
+		return err
+	}
+
+	if err := e.PreflightK3s(ctx, csiDrivers[opts.SetupCSI].hostpath); err != nil {
 		return err
 	}
 
@@ -362,7 +364,9 @@ func (e *Env) DeployAtelet(ctx context.Context) error {
 
 	var manifest []byte
 	var err error
-	if e.Cfg.Kind {
+	if e.Cfg.K3s != nil {
+		manifest, err = e.KustomizeResolve(ctx, installDir+"/k3s/atelet")
+	} else if e.Cfg.Kind {
 		// The kind overlay patches the DaemonSet for the local node layout.
 		manifest, err = e.KustomizeResolve(ctx, installDir+"/kind/atelet")
 	} else {

@@ -35,6 +35,7 @@ import (
 )
 
 type runsc struct {
+	profile  gvisorProfile
 	path     string
 	actorUID string
 	// actorDirs are the actor's directories, from the request.
@@ -75,13 +76,7 @@ func (r *runsc) shapeSpec(containerName string) error {
 	return ocispec.Save(bundle, spec)
 }
 
-func (r *runsc) cmdCreate(ctx context.Context, out io.Writer, containerName string, additionalArgs []string) error {
-	slog.InfoContext(ctx, "About to run runsc create", slog.String("container", containerName))
-
-	if err := r.shapeSpec(containerName); err != nil {
-		return fmt.Errorf("while shaping the OCI spec for %q: %w", containerName, err)
-	}
-
+func (r *runsc) createArgs(containerName string, additionalArgs []string) []string {
 	args := []string{
 		"-log-format", "json",
 		"--alsologtostderr",
@@ -96,6 +91,7 @@ func (r *runsc) cmdCreate(ctx context.Context, out io.Writer, containerName stri
 		// otherwise sizes to all host CPUs). Global flag: before the subcommand.
 		"--cpu-num-from-quota",
 	}
+	args = append(args, r.profile.flags()...)
 	args = append(args,
 		"create",
 		"-bundle", ociBundlePath(r.actorDirs, containerName),
@@ -104,6 +100,17 @@ func (r *runsc) cmdCreate(ctx context.Context, out io.Writer, containerName stri
 
 	args = append(args, additionalArgs...)
 	args = append(args, containerName) // Name of the container
+	return args
+}
+
+func (r *runsc) cmdCreate(ctx context.Context, out io.Writer, containerName string, additionalArgs []string) error {
+	slog.InfoContext(ctx, "About to run runsc create", slog.String("container", containerName))
+
+	if err := r.shapeSpec(containerName); err != nil {
+		return fmt.Errorf("while shaping the OCI spec for %q: %w", containerName, err)
+	}
+
+	args := r.createArgs(containerName, additionalArgs)
 	cmd := exec.CommandContext(
 		ctx,
 		r.path,
@@ -264,7 +271,7 @@ func (r *runsc) cmdResume(ctx context.Context, containerName string) error {
 // restoreArgs builds the argv for `runsc restore <container>`. Factored out so
 // the argument construction can be unit-tested without executing runsc.
 func (r *runsc) restoreArgs(containerName, checkpointPath string) []string {
-	return []string{
+	args := []string{
 		"-log-format", "json",
 		"--alsologtostderr",
 		// "-debug",
@@ -275,6 +282,9 @@ func (r *runsc) restoreArgs(containerName, checkpointPath string) []string {
 		"-root", runscStateDir(r.actorDirs),
 		// Match cmdCreate: size the restored sentry from the cgroup CPU quota.
 		"--cpu-num-from-quota",
+	}
+	args = append(args, r.profile.flags()...)
+	return append(args,
 		"restore",
 		"-bundle", ociBundlePath(r.actorDirs, containerName),
 		"-image-path", checkpointPath,
@@ -282,7 +292,7 @@ func (r *runsc) restoreArgs(containerName, checkpointPath string) []string {
 		"-background",
 		"-detach",
 		containerName,
-	}
+	)
 }
 
 // We take a checkpoint only of the root container of the sandbox, but we need
