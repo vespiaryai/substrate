@@ -1,8 +1,13 @@
 # Maintained census source checkpoint
 
-This is an incomplete implementation of selected candidate B. No source in this
-checkpoint has been imported, syntax checked, or executed. All application and
-native authorities remain false. No successful acquisition result can be emitted.
+This is an incomplete implementation of selected candidate B. The prior twenty-one
+fixtures passed at the previous source identity, with a retained native OK log
+and service exit status zero. Root's distinct closure companion records exact
+service, job, group, cgroup, known-child closure, source/runtime equality, and
+explicit lock release. The original direct wait is unavailable, and the root
+observer failed on an ordinary process executable read. The revised twenty-two
+cases below remain unrun. All application and native authorities remain false.
+No successful acquisition result can be emitted.
 The historical `prepare.py`, its tests, proposal, and argv remain unadopted history.
 
 `census_tools.py` owns one path-indexed observation map. It streams regular input
@@ -18,7 +23,7 @@ acquisition. It does not collect the complete corpus. The authored metadata text
 grammars refuse unknown records and mechanisms. Actual installed-output
 qualification remains unproved. Bootstrap candidate closure, package portions,
 and full serialized consumer projections remain unimplemented.
-Metadata process ownership is authored and unproved.
+The prior owned fixtures establish only their actual process assertions.
 Exact installed GIRepository, loader, and OpenSSL defaults
 also remain ungrounded. Do not grant an actual acquisition for this checkpoint.
 
@@ -39,12 +44,12 @@ Root must review and freeze both source files before authorizing this command.
 /usr/bin/env -i PATH=/usr/bin:/bin HOME=/home/zack LC_ALL=C LANG=C TZ=UTC /usr/bin/timeout --signal=TERM --kill-after=2s 135s /usr/bin/python3 -I -S -B /home/zack/orca/workspaces/substrate-goal330-20261020/goal330-daemon-only-bootstrap/docs/dev/verify-runtime-20261020/native-loading-inputs/test_census_tools.py
 ```
 
-`test_census_tools.py` authors twenty-one tests for real file and pathname replacement,
+`test_census_tools.py` authors twenty-two tests for real file and pathname replacement,
 regular/directory/link/absence observations, source mutation refusal, source-pin
 and duplicate/traversal rejection, first-use retention, file limits, false flags,
 and eligibility separation. Its fixed exclusive output is
-`/home/zack/.codex/orchestrate/vespiary-goal330/reviews/native-maintained-census-implementation/fixture-first`.
-It retains every fixture file. Nine metadata fixtures create owned executable
+`/home/zack/.codex/orchestrate/vespiary-goal330/reviews/native-completion-publication-fix/fixture-first22`.
+It retains every fixture file. Ten metadata fixtures create owned executable
 scripts with `/bin/sh` shebangs that immediately exec `/usr/bin/python3 -I -S -B`
 with literal small Python bodies. They exercise overflow, deadline, and a normal
 raw-output exit through the private operation. Additional child cases assert
@@ -59,10 +64,20 @@ The new failure fixtures author cancellation with stdout flush, fsync, close,
 and closure-record errors while checking retained stderr and physical closure.
 A second-SIGTERM fixture requires actual KILL and reap after the child signals
 its parent during TERM grace. A stream-read failure fixture requires stderr's
-remaining TERM-handler bytes despite stdout's separate error. These assertions
-remain unrun. The archive-join fixture calls `metadata_facts` on literal cache
-text in owned files. It accepts an exact record and refuses changed argv,
+remaining TERM-handler bytes despite stdout's separate error. The archive-join
+fixture calls `metadata_facts` on literal cache text in owned files. It accepts
+an exact record and refuses changed argv,
 digest, size, nonempty stderr, false closure, and missing closure fields.
+
+The new completion-publication fixture emits valid literal cache text through
+an owned child and injects an error at the complete-record publication boundary.
+It checks retained incompleteness and the recorded error, facts refusal, and
+actual reap and group closure. A copy with the complete flag set validates the
+archive and grammar so unrelated malformed output cannot explain the refusal.
+The injection precedes the actual write and does not simulate each storage
+failure separately. The owner publishes a complete copy before promoting its
+retained run. Any publication exception leaves that run incomplete with an
+in-memory error. Storage failure cannot promise a durable failure record.
 
 The metadata owner records its primary error before finalization. Each owned
 signal, wait4, pipe close, archive flush, fsync, close, and closure-record write
@@ -73,23 +88,23 @@ the scoped SIGTERM handler records cancellation without raising over cleanup.
 It preserves the first error and restores the previous handler afterward.
 It does not ignore or mask SIGTERM, change host limits, or change the outer
 TERM/KILL command. Any recorded cleanup failure prevents raw completeness.
-These are source mechanisms awaiting real-child proof.
+The revised publication mechanism awaits separately granted proof.
 
 Both commands propose parent CPU soft/hard limits of 120/122 seconds, 1 GiB
 address space, 128 descriptors, and 256 MiB per output file. The owner stops work
 at 117 seconds and reserves three seconds inside the 120-second parent boundary.
 The outer timeout sends TERM at 135 seconds and KILL two seconds later. Payload,
 record, and generated JSON maxima remain 1 GiB, 25000, and 8 MiB. These are limits,
-not measured fit. The nine owned fixture children each propose at most five
+not measured fit. The ten owned fixture children each propose at most five
 seconds of work, three seconds for termination/reap, CPU soft/hard of at most
 four/five seconds within the remaining aggregate grant, 512 MiB address space,
 2 MiB stdout and 256 KiB stderr. Real metadata utility execution remains gated.
 The added child fixtures use the same limits and do not enlarge the command.
 Each fixture creates its own Census, so child CPU, payload, JSON, records, and
 tool-byte counters are per owner. The parent CPU limit does not include child
-CPU. Nine children have a summed hard CPU ceiling of 45 seconds, alongside the
+CPU. Ten children have a summed hard CPU ceiling of 50 seconds, alongside the
 separate parent hard ceiling of 122 seconds. Their work and cleanup wall ceilings
-sum to 72 seconds if all nine reach both limits. These are ceiling calculations,
+sum to 80 seconds if all ten reach both limits. These are ceiling calculations,
 not timing or fit measurements. No suite-wide child account is claimed.
 
 Root must record source and fixture SHA-256 values before and after a granted

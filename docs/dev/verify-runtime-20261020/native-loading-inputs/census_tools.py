@@ -748,8 +748,12 @@ class Census:
             raise Incomplete('metadata failed or positive child closure unavailable') from error
         for raw in run['streams'].values():
             raw['sha256'] = raw.pop('partial_sha256')
+        try:
+            self.document(f'tools/{number:04d}.complete.json', {**run, 'complete': True})
+        except BaseException as failure:
+            run['error'] = f'completion publication: {type(failure).__name__}: {failure}'
+            raise Incomplete('metadata completion publication failed') from failure
         run['complete'] = True
-        self.document(f'tools/{number:04d}.complete.json', run)
         return run
 
     def metadata_facts(self, run):
