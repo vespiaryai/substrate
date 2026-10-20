@@ -18,39 +18,41 @@ from gi.repository import GLib
 
 
 def owned_job(bus, unit, operation, wait_seconds=15):
-    manager = dbus.Interface(
-        bus.get_object("org.freedesktop.systemd1", "/org/freedesktop/systemd1"),
-        "org.freedesktop.systemd1.Manager",
-    )
-    loop = GLib.MainLoop()
-    results = {}
-    expected = None
+    timer = None
+    receiver = None
     expired = False
-
-    def removed(_number, path, name, result):
-        if str(name) != unit:
-            raise RuntimeError("unit signal filter mismatch")
-        results[str(path)] = str(result)
-        if expected is not None and str(path) == expected:
-            loop.quit()
-
-    def timeout():
-        nonlocal expired
-        expired = True
-        loop.quit()
-        return GLib.SOURCE_REMOVE
-
-    bus.add_signal_receiver(
-        removed,
-        signal_name="JobRemoved",
-        dbus_interface="org.freedesktop.systemd1.Manager",
-        bus_name="org.freedesktop.systemd1",
-        path="/org/freedesktop/systemd1",
-        arg2=unit,
-    )
-    manager.Subscribe(timeout=5)
-    timer = GLib.timeout_add_seconds(wait_seconds, timeout)
     try:
+        manager = dbus.Interface(
+            bus.get_object("org.freedesktop.systemd1", "/org/freedesktop/systemd1"),
+            "org.freedesktop.systemd1.Manager",
+        )
+        loop = GLib.MainLoop()
+        results = {}
+        expected = None
+
+        def removed(_number, path, name, result):
+            if str(name) != unit:
+                raise RuntimeError("unit signal filter mismatch")
+            results[str(path)] = str(result)
+            if expected is not None and str(path) == expected:
+                loop.quit()
+
+        def timeout():
+            nonlocal expired
+            expired = True
+            loop.quit()
+            return GLib.SOURCE_REMOVE
+
+        receiver = bus.add_signal_receiver(
+            removed,
+            signal_name="JobRemoved",
+            dbus_interface="org.freedesktop.systemd1.Manager",
+            bus_name="org.freedesktop.systemd1",
+            path="/org/freedesktop/systemd1",
+            arg2=unit,
+        )
+        manager.Subscribe(timeout=5)
+        timer = GLib.timeout_add_seconds(wait_seconds, timeout)
         expected = str(operation(manager))
         if expected not in results:
             loop.run()
@@ -58,9 +60,15 @@ def owned_job(bus, unit, operation, wait_seconds=15):
             raise RuntimeError(f"unknown or failed owned job {unit} {expected}: {results}")
         return expected
     finally:
-        if not expired:
-            GLib.source_remove(timer)
-        bus.close()
+        try:
+            if timer is not None and not expired:
+                GLib.source_remove(timer)
+        finally:
+            try:
+                if receiver is not None:
+                    receiver.remove()
+            finally:
+                bus.close()
 
 
 def user_bus():
