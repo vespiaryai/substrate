@@ -24,6 +24,7 @@ import stat
 import subprocess
 import sys
 import time
+from typing import NamedTuple
 
 
 CHECKOUT = Path('/home/zack/orca/workspaces/substrate-goal330-20261020/goal330-daemon-only-bootstrap')
@@ -36,6 +37,10 @@ RECORDS = 25000
 JSON_BYTES = 8388608
 ENVIRONMENT = {'PATH': '/usr/bin:/bin', 'HOME': '/home/zack', 'LC_ALL': 'C', 'LANG': 'C', 'TZ': 'UTC'}
 TOOLS = {'readelf': '/usr/bin/readelf', 'cache': '/usr/sbin/ldconfig'}
+OBSERVER = Path(__file__).with_name('interpreter_observer.py')
+INTERPRETER = '/usr/bin/python3'
+# Installed support awaits independently reviewed source/build and startup joins.
+INTERPRETER_SUPPORT = None
 AUTHORITIES = dict.fromkeys(('application', 'import', 'offline', 'holder', 'finite', 'recheck', 'native'), False)
 GAPS = (
     'GIRepository build-correlated defaults await fixed declarations and namespace/library closure',
@@ -55,6 +60,115 @@ class Unsupported(Incomplete):
         self.family = family
         self.path = path
         super().__init__(f'{family}: {path}: {detail}')
+
+
+class InterpreterFacts(NamedTuple):
+    executable: str
+    prefix: str
+    base_prefix: str
+    version: str
+    search: tuple
+    builtins: tuple
+    frozen_candidates: tuple
+    frozen_active_flags: tuple
+    frozen: tuple
+    extension_suffixes: tuple
+
+
+class ObservedInterpreter(NamedTuple):
+    facts: InterpreterFacts
+    evidence: bytes
+
+    def to_document(self):
+        return strict_json(self.evidence)
+
+
+def strict_json(body):
+    if type(body) is not bytes or len(body) > 2097152 or not body.endswith(b'\n'):
+        raise Incomplete('interpreter JSON bounds or framing')
+
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise Incomplete('duplicate JSON key')
+            result[key] = value
+        return result
+
+    def constant(value):
+        raise Incomplete('nonfinite JSON constant')
+
+    def number(text):
+        value = float(text)
+        if value in (float('inf'), float('-inf')):
+            raise Incomplete('nonfinite JSON number')
+        return value
+
+    try:
+        text = body[:-1].decode('ascii', errors='strict')
+        value, end = json.JSONDecoder(object_pairs_hook=pairs, parse_constant=constant,
+                                     parse_float=number).raw_decode(text)
+        if end != len(text):
+            raise Incomplete('extra JSON whitespace or values')
+        pending = [value]
+        while pending:
+            item = pending.pop()
+            if type(item) is str:
+                if '\x00' in item:
+                    raise Incomplete('NUL in JSON scalar')
+                item.encode('utf-8', errors='strict')
+            elif type(item) is dict:
+                pending.extend(item)
+                pending.extend(item.values())
+            elif type(item) is list:
+                pending.extend(item)
+        return value
+    except (ValueError, UnicodeError, RecursionError) as error:
+        raise Incomplete('invalid interpreter JSON') from error
+
+
+def interpreter_facts(body):
+    value = strict_json(body)
+    fields = set(InterpreterFacts._fields)
+    if type(value) is not dict or set(value) != fields | {'schema'}:
+        raise Incomplete('interpreter fields differ')
+    if type(value['schema']) is not str or value['schema'] != 'interpreter-observation-1':
+        raise Incomplete('interpreter schema differs')
+
+    def scalar(text, cap=4096):
+        if type(text) is not str or not text or '\x00' in text:
+            raise Incomplete('invalid interpreter scalar')
+        try:
+            if len(text.encode('utf-8', errors='strict')) > cap:
+                raise Incomplete('interpreter scalar cap')
+        except UnicodeError as error:
+            raise Incomplete('invalid interpreter Unicode') from error
+        return text
+
+    for name in ('executable', 'prefix', 'base_prefix'):
+        absolute(scalar(value[name]))
+    scalar(value['version'], 65536)
+    for name in fields - {'executable', 'prefix', 'base_prefix', 'version'}:
+        items = value[name]
+        if type(items) is not list or len(items) > 4096:
+            raise Incomplete('interpreter inventory cap or type')
+        for item in items:
+            if name == 'frozen_active_flags':
+                if type(item) is not bool:
+                    raise Incomplete('frozen predicate must be bool')
+            else:
+                scalar(item)
+                if name == 'search':
+                    absolute(item)
+                if name == 'extension_suffixes' and ('/' in item or '\\' in item):
+                    raise Incomplete('invalid extension suffix')
+        if name not in {'search', 'frozen_active_flags'} and len(set(items)) != len(items):
+            raise Incomplete('duplicate interpreter inventory')
+    candidates, flags = value['frozen_candidates'], value['frozen_active_flags']
+    if len(candidates) != len(flags) or value['frozen'] != [n for n, flag in zip(candidates, flags) if flag]:
+        raise Incomplete('frozen predicate inventory differs')
+    return InterpreterFacts(*(value[n] if n in {'executable', 'prefix', 'base_prefix', 'version'}
+                              else tuple(value[n]) for n in InterpreterFacts._fields))
 
 
 def consumer_json(value):
@@ -294,6 +408,7 @@ class Census:
         self.runs = []
         self.child_cpu = 0
         self.tool_bytes = 0
+        self.interpreter_attempted = False
         self._reserve_output()
 
     def _reserve_output(self):
@@ -791,23 +906,43 @@ class Census:
                 raise Unsupported(family, path, 'required family member is absent')
 
     def metadata(self, operation, subjects):
-        if any(not run['reaped'] or not run['group_closed'] for run in self.runs):
-            raise Incomplete('previous metadata group closure is unknown')
         if operation not in TOOLS or not 1 <= len(subjects) <= (16 if operation == 'readelf' else 1):
             raise Incomplete('unknown metadata operation or subject count')
+        return self._run_child(operation, subjects)
+
+    def _run_child(self, operation, subjects=()):
+        if any(not run['reaped'] or not run['group_closed'] for run in self.runs):
+            raise Incomplete('previous metadata group closure is unknown')
+        if operation not in {'readelf', 'cache', 'interpreter'}:
+            raise Incomplete('unknown child operation')
         used = resource.getrusage(resource.RUSAGE_SELF)
         remaining = int(120 - used.ru_utime - used.ru_stime - self.child_cpu - 3)
         if len(self.runs) >= 256 or remaining < 1 or time.monotonic() + 8 >= self.deadline:
             raise Incomplete('metadata admission reserves CPU and cleanup')
-        executable = TOOLS[operation]
+        executable = INTERPRETER if operation == 'interpreter' else TOOLS[operation]
         self.capture(executable, 'acquisition-tool', eligible=True)
         tool = self.regular_row(executable)['raw'].copy()
         archived = [str(self.output / self.regular_row(path)['raw']['name']) for path in subjects]
-        argv = ([executable, '--wide', '--file-header', '--program-headers', '--dynamic',
-                 '--debug-dump=no-follow-links', '--debug-dump=do-not-use-debuginfod', *archived]
-                if operation == 'readelf' else [executable, '--print-cache', '-C', *archived])
-        run = {'argv': argv, 'subjects': list(subjects), 'tool': tool, 'complete': False,
-               'scope': 'raw-metadata-only', 'grammar_validated': False, 'bootstrap_closed': False,
+        environment = {**ENVIRONMENT, 'DEBUGINFOD_URLS': ''}
+        cwd = None
+        if operation == 'readelf':
+            argv = [executable, '--wide', '--file-header', '--program-headers', '--dynamic',
+                    '--debug-dump=no-follow-links', '--debug-dump=do-not-use-debuginfod', *archived]
+        elif operation == 'cache':
+            argv = [executable, '--print-cache', '-C', *archived]
+        else:
+            source = self.small_body(str(OBSERVER))
+            environment = ENVIRONMENT.copy()
+            cwd = '/'
+            argv = [executable, '-I', '-S', '-B', '-c', source.decode('utf-8', errors='strict')]
+            env_bytes = sum(len(os.fsencode(k + '=' + v)) + 1 for k, v in environment.items())
+            argv_bytes = sum(len(os.fsencode(arg)) + 1 for arg in argv)
+            if len(source) > 16384 or env_bytes > 8192 or argv_bytes + env_bytes > 32768:
+                raise Incomplete('interpreter launch byte cap')
+        run = {'operation': operation, 'argv': argv, 'environment': environment, 'cwd': cwd,
+               'subjects': list(subjects), 'tool': tool, 'complete': False,
+               'scope': 'raw-interpreter-only' if operation == 'interpreter' else 'raw-metadata-only',
+               'grammar_validated': False, 'bootstrap_closed': False,
                'group_closed': False, 'reaped': False, 'returncode': None, 'streams': {},
                'error': None, 'cleanup_errors': []}
         self.runs.append(run)
@@ -898,7 +1033,7 @@ class Census:
                 raise Incomplete('metadata spawn has insufficient CPU or cleanup reservation')
             run['cpu_soft_hard_seconds'] = [min(4, remaining), min(5, remaining)]
             child = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                     env={**ENVIRONMENT, 'DEBUGINFOD_URLS': ''}, close_fds=True,
+                                     env=environment, cwd=cwd, close_fds=True,
                                      start_new_session=True, preexec_fn=child_limits)
             run['pid'] = child.pid
             run['pgid'] = child.pid
@@ -989,6 +1124,8 @@ class Census:
             raise Incomplete('metadata failed or positive child closure unavailable') from error
         for raw in run['streams'].values():
             raw['sha256'] = raw.pop('partial_sha256')
+            if operation == 'interpreter':
+                raw['identity'] = identity(os.lstat(self.output / raw['name']))
         try:
             self.document(f'tools/{number:04d}.complete.json', {**run, 'complete': True})
         except BaseException as failure:
@@ -997,12 +1134,132 @@ class Census:
         run['complete'] = True
         return run
 
+    def observe_interpreter(self):
+        if self.interpreter_attempted:
+            raise Unsupported('interpreter-observation', 'admission', 'only one attempt is allowed')
+        self.interpreter_attempted = True
+        if INTERPRETER_SUPPORT is None:
+            raise Unsupported('interpreter-observation', 'support', 'installed source/build support is unreviewed')
+        try:
+            support_path, support_digest = INTERPRETER_SUPPORT
+            sources = (str(Path(__file__)), str(OBSERVER), support_path)
+            pins = {}
+            for path in sources:
+                self.capture(path, 'interpreter-observation-source')
+                pins[path] = self.regular_row(path)['raw'].copy()
+            if pins[support_path]['sha256'] != support_digest:
+                raise Incomplete('interpreter support source digest differs')
+            support = strict_json(self.small_body(support_path))
+            if (type(support) is not dict or set(support) != {'schema', 'scope', 'executable', 'sha256'} or
+                    support['schema'] != 'interpreter-source-contract-1' or
+                    support['scope'] != 'owned-fixture-only' or support['executable'] != INTERPRETER):
+                raise Incomplete('unsupported interpreter source contract')
+            self.capture(INTERPRETER, 'interpreter-before-observation')
+            launched = self.regular_row(INTERPRETER)
+            executable_digest = launched['raw']['sha256']
+            if (type(support['sha256']) is not str or support['sha256'] != executable_digest or
+                    not launched['before']['st_mode'] & 0o111):
+                raise Incomplete('interpreter executable support differs')
+            run = self._run_child('interpreter')
+            bodies = self._interpreter_raw(run)
+            facts = interpreter_facts(bodies['stdout'])
+            paths = sorted(set((facts.executable, facts.prefix, facts.base_prefix, *facts.search)))
+            for path in paths:
+                self.capture(path, 'interpreter-reported-path')
+            if (self.resolved(facts.executable)[0] != self.resolved(INTERPRETER)[0] or
+                    self.regular_row(facts.executable)['raw']['sha256'] != executable_digest):
+                raise Incomplete('reported interpreter differs from launch')
+            for path in (facts.prefix, facts.base_prefix):
+                if self.resolved(path)[1]['kind'] != 'directory':
+                    raise Incomplete('interpreter prefix is not a directory')
+            for path in tuple(self.paths):
+                self.reobserve(path)
+            for path, pin in pins.items():
+                if self.regular_row(path)['raw'] != pin:
+                    raise Incomplete('interpreter source changed')
+                self.small_body(path)
+            if self._interpreter_raw(run) != bodies:
+                raise Incomplete('interpreter raw bytes changed')
+            joined = {}
+            for path in paths:
+                row = self.resolved(path)[1]
+                value = None if row['kind'] == 'absent' else row['before'].copy()
+                if value is not None and any(type(n) is not int for n in value.values()):
+                    raise Incomplete('parent identity requires exact integers')
+                joined[path] = value
+            document = {'status': 'observation-complete', 'basis': 'owner-completed-interpreter-observation',
+                        'facts_provenance': 'owned-child-self-report', 'qualification': 'unproved',
+                        'facts': facts._asdict(), 'identities': joined,
+                        'executable_sha256': executable_digest, 'sources': pins, 'receipt': run,
+                        'correlation': 'parent-post-report-samples-not-simultaneous-identities',
+                        'authorities': AUTHORITIES.copy(), 'selection': 'unobserved'}
+            evidence = (json.dumps(document, ensure_ascii=True, allow_nan=False, sort_keys=True,
+                                   separators=(',', ':')) + '\n').encode('ascii')
+            strict_json(evidence)
+            self._publish_interpreter(document)
+            return ObservedInterpreter(facts, evidence)
+        except BaseException as error:
+            if isinstance(error, Incomplete):
+                raise
+            raise Incomplete('interpreter observation failed') from error
+
+    def _interpreter_raw(self, run):
+        if (run.get('operation') != 'interpreter' or run.get('complete') is not True or
+                run.get('reaped') is not True or run.get('group_closed') is not True or
+                run.get('pipes_drained') is not True or run.get('cleanup_errors') or
+                type(run.get('returncode')) is not int or run['returncode'] != 0):
+            raise Incomplete('interpreter raw completion or closure unavailable')
+        bodies = {}
+        for name, cap in (('stdout', 2097152), ('stderr', 262144)):
+            raw = run['streams'][name]
+            if (type(raw['size']) is not int or not 0 <= raw['size'] <= cap or
+                    not re.fullmatch(r'tools/[0-9]{4}\.' + name + r'\.raw', raw['name'])):
+                raise Incomplete('interpreter raw reference differs')
+            descriptor = os.open(self.output / raw['name'], os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+            with os.fdopen(descriptor, 'rb') as stream:
+                before = identity(os.fstat(stream.fileno()))
+                if not stat.S_ISREG(before['st_mode']):
+                    raise Incomplete('interpreter raw is not regular')
+                body = stream.read(cap + 1)
+                after = identity(os.fstat(stream.fileno()))
+            if (before != raw['identity'] or before != after or
+                    after != identity(os.lstat(self.output / raw['name'])) or
+                    len(body) != raw['size'] or hashlib.sha256(body).hexdigest() != raw['sha256']):
+                raise Incomplete('interpreter raw changed')
+            bodies[name] = body
+        if bodies['stderr']:
+            raise Incomplete('interpreter diagnostic output')
+        return bodies
+
+    def _publish_interpreter(self, document):
+        pending = self.output / 'interpreter.pending.json'
+        final = self.output / 'interpreter.complete.json'
+        linked = False
+        try:
+            self.document(pending.name, document)
+            os.link(pending, final, follow_symlinks=False)
+            linked = True
+            descriptor = os.open(self.output, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+        except BaseException as error:
+            if linked:
+                try:
+                    final.unlink()
+                except BaseException as cleanup_error:
+                    raise Incomplete(f'interpreter publication cleanup failed: {cleanup_error}') from error
+            raise Incomplete('interpreter completion publication failed') from error
+
     def metadata_facts(self, run):
         if (not run.get('complete') or run.get('returncode') != 0 or
                 not run.get('reaped') or not run.get('group_closed')):
             raise Incomplete('metadata facts require complete raw output and closure')
         archived = [str(self.output / self.regular_row(path)['raw']['name']) for path in run['subjects']]
-        operation = 'readelf' if run['argv'][0] == TOOLS['readelf'] else 'cache'
+        operation = run.get('operation')
+        if operation not in {'readelf', 'cache'}:
+            raise Incomplete('metadata facts require a metadata operation')
         expected = ([TOOLS['readelf'], '--wide', '--file-header', '--program-headers', '--dynamic',
                      '--debug-dump=no-follow-links', '--debug-dump=do-not-use-debuginfod', *archived]
                     if operation == 'readelf' else [TOOLS['cache'], '--print-cache', '-C', *archived])

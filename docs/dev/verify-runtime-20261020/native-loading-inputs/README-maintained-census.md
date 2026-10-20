@@ -9,8 +9,9 @@ completeness, native loading, runtime selection, or budget fit.
 `census_tools.py` owns one path-indexed observation map. Corpus files, resources,
 existing bytecode, directory memberships, links and absences share that map.
 Candidate status and explicit actor eligibility remain separate. The only metadata
-operations retain fixed readelf and read-only ldconfig argv forms. Their process
-ownership, ten child fixture behaviors and cleanup code are unchanged here.
+operations retain fixed readelf and read-only ldconfig argv forms. They share one
+bounded child lifecycle with the fixed interpreter adapter. Raw receipts carry an
+explicit operation, and metadata grammar routing refuses interpreter receipts.
 The historical prepare.py design remains unadopted.
 
 ## Supplied corpus contract
@@ -37,6 +38,55 @@ The executable needs executable mode and a matching buffer digest. Both prefixes
 must be directories. Module and suffix lists must be nonempty and unique, and
 built-in/frozen sets must be disjoint. This validation returns host_observed false.
 A supplied literal record never establishes actual isolated interpreter facts.
+
+## Fixed interpreter observation
+
+`Census.observe_interpreter()` has no command, source, environment or output
+options. Installed support is refused before launch. The only source contract
+currently admitted by the private fixture seam is `owned-fixture-only`, bound to
+an exact synthetic executable digest. See [the support checkpoint](interpreter-source-contract.md).
+That seam cannot qualify an installed interpreter.
+
+The fixed adjacent `interpreter_observer.py` explicitly imports sys, _imp and json.
+It emits compact sorted ASCII JSON with ensure_ascii true, allow_nan false and
+exactly one LF. The parent pins the source bytes and passes them as the exact
+`-c` operand after `-I -S -B`. The cwd is `/` and the environment is the existing
+fixed scrubbed environment. Source, environment and aggregate argv/environment
+caps are 16 KiB, 8 KiB and 32 KiB. These are admission policies, not platform
+argument-limit guarantees. Launch errors remain incomplete.
+
+The parent rejects duplicate keys, nonfinite values, extra framing, wrong exact
+types, NUL, lone surrogates, noncanonical paths and exceeded bounds. It retains
+candidate names and exact boolean predicate flags and checks their ordered active
+subset. Search duplicates, empty lists, builtin/frozen overlap and suffix order
+remain observable facts. Lists admit at most 4096 items, each scalar at most
+4096 UTF-8 bytes, except version at 64 KiB. Raw caps remain 2 MiB stdout and
+256 KiB stderr, within existing aggregate accounting.
+
+One observation attempt per owner shares the existing five-second work and
+three-second cleanup policy. Successful raw completion only closes the child
+transport. Final observation completion additionally requires strict parsing,
+stable source and raw identities, parent filesystem joins, executable agreement,
+directory prefixes and exclusive durable publication. Pending publication bytes
+are distinct from `interpreter.complete.json`. Publication uncertainty returns no
+completed value. The result contains immutable tuples and immutable evidence
+bytes. `to_document()` returns a fresh decoded copy.
+
+Facts remain child self-report. Identity joins are parent samples after the
+report, not simultaneous identities or kernel proof of the executed inode.
+JSON startup includes loader/bootstrap and attempted accelerators. No complete
+native graph or zero-native-loading claim follows. Supplied records retain their
+original provenance, main retains GAPS, selection stays unobserved, and all seven
+authorities stay false. Neither corpus traversal nor profile activation follows.
+
+New fixtures are authored and unrun. They include literal protocol and envelope
+fields, real synthetic children, fixed-emitter empty/missing-API cases, launch
+bounds, drift, caps, deadlines, interruption, raw/final publication failure and
+the six existing cancellation/finalizer oracles through the new adapter. All 41
+predecessor methods and their supplied-record expectations remain. The literal
+cache receipt fixture now names its operation explicitly. The fresh exclusive
+fixture root is `reviews/native-interpreter-implementation/fixture-interpreter-01`
+under the coordinator store. No historical fixture root is consumed.
 
 ## One projection owner
 

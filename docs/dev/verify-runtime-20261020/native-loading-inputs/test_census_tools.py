@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import hashlib
+from contextlib import ExitStack
 import importlib.util
 import json
 import os
@@ -25,7 +26,7 @@ from unittest.mock import patch
 
 
 SOURCE = Path(__file__).with_name('census_tools.py')
-FIXTURE = Path('/home/zack/.codex/orchestrate/vespiary-goal330/reviews/native-projection-manifest-map-fix/fixture-manifest-map-01')
+FIXTURE = Path('/home/zack/.codex/orchestrate/vespiary-goal330/reviews/native-interpreter-implementation/fixture-interpreter-01')
 DECLARATIONS = {'loaded_sources_complete': True, 'module_report_complete': True,
                 'suite_output_bound_declared': True}
 spec = importlib.util.spec_from_file_location('census_tools_fixture', SOURCE)
@@ -222,6 +223,339 @@ Dynamic section at offset 0x100 contains 3 entries:
         profile['operations']['holder'] = True
         with self.assertRaises(census_tools.Incomplete):
             census_tools.disabled(profile)
+
+    def test_interpreter_literal_protocol(self):
+        body = (b'{"base_prefix":"/prefix","builtins":["same"],"executable":"/python",'
+                b'"extension_suffixes":[".z.so",".so"],"frozen":["same"],'
+                b'"frozen_active_flags":[true,false],"frozen_candidates":["same","inactive"],'
+                b'"prefix":"/prefix","schema":"interpreter-observation-1",'
+                b'"search":["/search","/search","/absent"],'
+                b'"version":"quote\\\" slash\\\\ tab\\t \\u00e9 \\ud83d\\ude00"}\n')
+        result = census_tools.interpreter_facts(body)
+        self.assertEqual(tuple(result), ('/python', '/prefix', '/prefix',
+            'quote" slash\\ tab\t é 😀', ('/search', '/search', '/absent'), ('same',),
+            ('same', 'inactive'), (True, False), ('same',), ('.z.so', '.so')))
+        for bad in (body[:-1], body + b'\n', body[:-1] + b' \n', b' ' + body,
+                    body.replace(b'"same"],"executable"', b'"same","same"],"executable"'),
+                    body.replace(b'true,false', b'1,false'),
+                    body.replace(b'true,false', b'true'),
+                    body.replace(b'"frozen":["same"]', b'"frozen":[]'),
+                    body.replace(b'"prefix":"/prefix"', b'"prefix":"/prefix","prefix":"/other"'),
+                    body.replace(b'"/python"', b'NaN'), body.replace(b'"/python"', b'Infinity'),
+                    body.replace(b'"/python"', b'1e999'),
+                    body.replace(b'"/python"', b'"/py\\ud800"'),
+                    body.replace(b'"/python"', b'"/py\\u0000"'),
+                    body.replace(b'"/python"', b'"/py\xff"'),
+                    body.replace(b'"/python"', b'true'),
+                    body.replace(b'"search":[', b'"unknown":[],"search":['),
+                    body.replace(b'".z.so"', b'"../z.so"')):
+            with self.subTest(body=bad):
+                with self.assertRaises(census_tools.Incomplete):
+                    census_tools.interpreter_facts(bad)
+        empty = (b'{"base_prefix":"/p","builtins":[],"executable":"/x",'
+                 b'"extension_suffixes":[],"frozen":[],"frozen_active_flags":[],"frozen_candidates":[], '
+                 b'"prefix":"/p","schema":"interpreter-observation-1","search":[],"version":"v"}\n')
+        self.assertEqual(tuple(census_tools.interpreter_facts(empty)),
+                         ('/x', '/p', '/p', 'v', (), (), (), (), (), ()))
+        with self.assertRaises(census_tools.Incomplete):
+            census_tools.interpreter_facts(b'x' * 2097153)
+
+    def interpreter_fixture(self, body=None):
+        executable = self.inputs / 'owned-interpreter'
+        prefix = str(self.inputs)
+        literal = ('{"base_prefix":' + json.dumps(prefix) + ',"builtins":["same"],"executable":' +
+                   json.dumps(str(executable)) + ',"extension_suffixes":[".z.so",".so"],'
+                   '"frozen":["same"],"frozen_active_flags":[true,false],'
+                   '"frozen_candidates":["same","inactive"],"prefix":' + json.dumps(prefix) +
+                   ',"schema":"interpreter-observation-1","search":[' + json.dumps(prefix) + ',' +
+                   json.dumps(prefix) + ',' + json.dumps(prefix + '/absent') + '],"version":"fixture"}\n').encode('ascii')
+        if body is None:
+            body = 'import os; os.write(1, ' + repr(literal) + ')'
+        executable.write_text('#!/bin/sh\nexec /usr/bin/python3 -I -S -B -c ' + shlex.quote(body) + ' "$@"\n')
+        executable.chmod(0o700)
+        support = self.inputs / 'source-contract.json'
+        support.write_text(json.dumps({'schema': 'interpreter-source-contract-1', 'scope': 'owned-fixture-only',
+            'executable': str(executable), 'sha256': hashlib.sha256(executable.read_bytes()).hexdigest()},
+            sort_keys=True, separators=(',', ':')) + '\n')
+        return self.owner(), executable, support, literal
+
+    def observation(self, owner, executable, support):
+        with patch.object(census_tools, 'INTERPRETER', str(executable)), \
+                patch.object(census_tools, 'INTERPRETER_SUPPORT',
+                             (str(support), hashlib.sha256(support.read_bytes()).hexdigest())):
+            return owner.observe_interpreter()
+
+    def assert_child_closed(self, owner):
+        run = owner.runs[0]
+        self.assertEqual((run['reaped'], run['group_closed']), (True, True))
+        with self.assertRaises(ProcessLookupError):
+            os.killpg(run['pgid'], 0)
+        with self.assertRaises(ChildProcessError):
+            os.waitpid(run['pid'], os.WNOHANG)
+
+    def test_interpreter_owned_child_completion(self):
+        owner, executable, support, literal = self.interpreter_fixture()
+        result = self.observation(owner, executable, support)
+        document = result.to_document()
+        self.assertEqual(set(document), {'status', 'basis', 'facts_provenance', 'qualification', 'facts',
+            'identities', 'executable_sha256', 'sources', 'receipt', 'correlation', 'authorities', 'selection'})
+        self.assertEqual(document['facts'], {
+            'executable': str(executable), 'prefix': str(self.inputs), 'base_prefix': str(self.inputs),
+            'version': 'fixture', 'search': [str(self.inputs), str(self.inputs), str(self.inputs / 'absent')],
+            'builtins': ['same'], 'frozen_candidates': ['same', 'inactive'],
+            'frozen_active_flags': [True, False], 'frozen': ['same'], 'extension_suffixes': ['.z.so', '.so']})
+        self.assertEqual({k: document[k] for k in ('status', 'basis', 'facts_provenance', 'qualification',
+                                                 'authorities', 'selection', 'correlation')}, {
+            'status': 'observation-complete', 'basis': 'owner-completed-interpreter-observation',
+            'facts_provenance': 'owned-child-self-report', 'qualification': 'unproved',
+            'authorities': {'application': False, 'import': False, 'offline': False, 'holder': False,
+                            'finite': False, 'recheck': False, 'native': False}, 'selection': 'unobserved',
+            'correlation': 'parent-post-report-samples-not-simultaneous-identities'})
+        keys = ('st_dev', 'st_ino', 'st_mode', 'st_uid', 'st_gid', 'st_size', 'st_mtime_ns', 'st_ctime_ns')
+        self.assertEqual(document['identities'], {
+            str(executable): {key: getattr(executable.stat(), key) for key in keys},
+            str(self.inputs): {key: getattr(self.inputs.stat(), key) for key in keys},
+            str(self.inputs / 'absent'): None})
+        self.assertEqual((self.output / 'tools/0001.stdout.raw').read_bytes(), literal)
+        self.assertEqual((self.output / 'interpreter.complete.json').read_bytes(), result.evidence)
+        self.assertEqual(document['receipt']['argv'][1:5], ['-I', '-S', '-B', '-c'])
+        self.assertEqual(document['receipt']['argv'][5], census_tools.OBSERVER.read_text())
+        expected_sources = {}
+        for number, path in enumerate((SOURCE, census_tools.OBSERVER, support), 1):
+            body = path.read_bytes()
+            expected_sources[str(path)] = {'name': f'raw/{number:06d}.bin', 'size': len(body),
+                                         'sha256': hashlib.sha256(body).hexdigest()}
+        self.assertEqual(document['sources'], expected_sources)
+        executable_body = executable.read_bytes()
+        self.assertEqual(document['executable_sha256'], hashlib.sha256(executable_body).hexdigest())
+        receipt = document['receipt'].copy()
+        spawn = json.loads((self.output / 'tools/0001.spawn.json').read_bytes())
+        for dynamic in ('elapsed_seconds', 'child_cpu_seconds'):
+            self.assertIs(type(receipt.pop(dynamic)), float)
+        streams = {}
+        for name, body in (('stdout', literal), ('stderr', b'')):
+            path = self.output / ('tools/0001.' + name + '.raw')
+            streams[name] = {'name': 'tools/0001.' + name + '.raw', 'size': len(body),
+                'sha256': hashlib.sha256(body).hexdigest(),
+                'identity': {key: getattr(path.stat(), key) for key in keys}}
+        self.assertEqual(receipt, {'operation': 'interpreter',
+            'argv': [str(executable), '-I', '-S', '-B', '-c', census_tools.OBSERVER.read_text()],
+            'environment': {'PATH': '/usr/bin:/bin', 'HOME': '/home/zack', 'LC_ALL': 'C', 'LANG': 'C', 'TZ': 'UTC'},
+            'cwd': '/', 'subjects': [],
+            'tool': {'name': 'raw/000004.bin', 'size': len(executable_body),
+                     'sha256': hashlib.sha256(executable_body).hexdigest()},
+            'complete': True, 'scope': 'raw-interpreter-only', 'grammar_validated': False,
+            'bootstrap_closed': False, 'group_closed': True, 'reaped': True, 'returncode': 0,
+            'streams': streams, 'error': None, 'cleanup_errors': [], 'pipes_drained': True,
+            'cpu_soft_hard_seconds': [4, 5], 'pid': spawn['pid'], 'pgid': spawn['pid']})
+        self.assert_child_closed(owner)
+        document['authorities']['native'] = True
+        self.assertFalse(result.to_document()['authorities']['native'])
+        with self.assertRaises(census_tools.Incomplete):
+            owner.metadata_facts(owner.runs[0])
+        with self.assertRaises(census_tools.Incomplete):
+            owner.observe_interpreter()
+
+    def test_interpreter_unsupported_is_prespawn(self):
+        owner = self.owner()
+        with self.assertRaisesRegex(census_tools.Unsupported, 'support'):
+            owner.observe_interpreter()
+        self.assertEqual(owner.runs, [])
+
+    def test_fixed_emitter_empty_and_missing_api_owned_children(self):
+        for missing in (False, True):
+            with self.subTest(missing=missing):
+                self.output = self.outputs / ('missing' if missing else 'empty')
+                executable = str(self.inputs / 'owned-interpreter')
+                prefix = str(self.inputs)
+                body = ('import builtins,sys,types,json\n'
+                    'original = builtins.__import__\n'
+                    'fake_sys = types.SimpleNamespace(executable=' + repr(executable) + ',prefix=' + repr(prefix) +
+                    ',base_prefix=' + repr(prefix) + ',version="fixture",path=[],builtin_module_names=(),stdout=sys.stdout)\n'
+                    'fake_imp = types.SimpleNamespace(extension_suffixes=lambda:[],is_frozen=lambda n:False' +
+                    ('' if missing else ',_frozen_module_names=lambda:[]') + ')\n'
+                    'def importing(name,*args,**kwargs):\n'
+                    ' if name == "sys": return fake_sys\n'
+                    ' if name == "_imp": return fake_imp\n'
+                    ' return original(name,*args,**kwargs)\n'
+                    'source = sys.argv[-1]\n'
+                    'builtins.__import__ = importing\n'
+                    'exec(compile(source,"owned-observer","exec"),{})\n')
+                owner, executable_path, support, _literal = self.interpreter_fixture(body)
+                if missing:
+                    with self.assertRaises(census_tools.Incomplete):
+                        self.observation(owner, executable_path, support)
+                    self.assertFalse((self.output / 'interpreter.complete.json').exists())
+                else:
+                    result = self.observation(owner, executable_path, support)
+                    expected = ('{"base_prefix":' + json.dumps(prefix) + ',"builtins":[],"executable":' +
+                        json.dumps(executable) + ',"extension_suffixes":[],"frozen":[],"frozen_active_flags":[],'
+                        '"frozen_candidates":[],"prefix":' + json.dumps(prefix) +
+                        ',"schema":"interpreter-observation-1","search":[],"version":"fixture"}\n').encode('ascii')
+                    self.assertEqual((self.output / 'tools/0001.stdout.raw').read_bytes(), expected)
+                    self.assertEqual(tuple(result.facts), (executable, prefix, prefix, 'fixture', (), (), (), (), (), ()))
+                self.assert_child_closed(owner)
+
+    def test_interpreter_overflow_and_deadline_close_real_group(self):
+        for name, body, prefix in (
+                ('overflow', 'import os; os.write(1,b"x"*2097153)', b'x' * 2097152),
+                ('deadline', 'import os,time; os.write(1,b"ready"); time.sleep(30)', b'ready')):
+            with self.subTest(name=name):
+                self.output = self.outputs / name
+                owner, executable, support, _literal = self.interpreter_fixture(body)
+                with self.assertRaises(census_tools.Incomplete):
+                    self.observation(owner, executable, support)
+                self.assert_child_closed(owner)
+                self.assertEqual((self.output / 'tools/0001.stdout.raw').read_bytes(), prefix)
+                self.assertFalse((self.output / 'interpreter.complete.json').exists())
+
+    def test_interpreter_signals_preserve_primary_and_term_prefix(self):
+        body = ('import os,signal,time\n'
+                'def stop(*args):\n'
+                ' os.write(2,b"term-prefix"); os.kill(os.getppid(),signal.SIGTERM)\n'
+                'signal.signal(signal.SIGTERM,stop)\n'
+                'os.kill(os.getppid(),signal.SIGTERM)\n'
+                'time.sleep(30)\n')
+        owner, executable, support, _literal = self.interpreter_fixture(body)
+        with self.assertRaises(census_tools.Incomplete) as raised:
+            self.observation(owner, executable, support)
+        self.assertEqual(str(raised.exception.__cause__), 'parent interrupted')
+        self.assert_child_closed(owner)
+        self.assertEqual((self.output / 'tools/0001.stderr.raw').read_bytes(), b'term-prefix')
+        self.assertFalse((self.output / 'interpreter.complete.json').exists())
+
+    def test_interpreter_completion_publication_failure_returns_no_value(self):
+        owner, executable, support, _literal = self.interpreter_fixture()
+        with patch.object(census_tools.os, 'link', side_effect=OSError('fixture publish')):
+            with self.assertRaisesRegex(census_tools.Incomplete, 'publication'):
+                self.observation(owner, executable, support)
+        self.assert_child_closed(owner)
+        self.assertFalse((self.output / 'interpreter.complete.json').exists())
+
+    def test_interpreter_adapter_retains_all_cancellation_finalizers(self):
+        cases = (
+            self.test_metadata_cancellation_drains_term_handler_prefixes,
+            self.test_metadata_cancellation_bounds_term_output,
+            self.test_metadata_parent_signal_preserves_error_and_drains,
+            self.test_metadata_cancellation_continues_after_finalizer_errors,
+            self.test_metadata_second_parent_signal_still_kills_and_reaps,
+            self.test_metadata_drain_error_preserves_other_stream_prefix,
+        )
+        for case in cases:
+            with self.subTest(case=case.__name__), ExitStack() as stack:
+                self.output = self.outputs / case.__name__
+
+                def fixture(body):
+                    owner, executable, support, _literal = self.interpreter_fixture(body)
+                    stack.enter_context(patch.object(census_tools, 'INTERPRETER', str(executable)))
+                    stack.enter_context(patch.object(census_tools, 'INTERPRETER_SUPPORT',
+                        (str(support), hashlib.sha256(support.read_bytes()).hexdigest())))
+                    return owner, executable, executable
+
+                stack.enter_context(patch.object(self, 'metadata_fixture', side_effect=fixture))
+                stack.enter_context(patch.object(census_tools.Census, 'metadata',
+                    lambda owner, operation, subjects: owner.observe_interpreter()))
+                case()
+
+    def test_interpreter_source_raw_and_path_drift_refuse_completion(self):
+        for change in ('observer', 'owner', 'raw', 'executable', 'wrong-executable', 'prefix'):
+            with self.subTest(change=change), ExitStack() as stack:
+                self.output = self.outputs / change
+                emitter = self.inputs / 'observer.py'
+                emitter.write_bytes(census_tools.OBSERVER.read_bytes())
+                owner_source = self.inputs / 'owner.py'
+                owner_source.write_bytes(SOURCE.read_bytes())
+                stack.enter_context(patch.object(census_tools, 'OBSERVER', emitter))
+                stack.enter_context(patch.object(census_tools, '__file__', str(owner_source)))
+                owner, executable, support, _literal = self.interpreter_fixture()
+                original_raw = owner._interpreter_raw
+                calls = 0
+
+                def mutate(run):
+                    nonlocal calls
+                    bodies = original_raw(run)
+                    calls += 1
+                    if calls == 1:
+                        if change in ('observer', 'owner', 'executable'):
+                            target = {'observer': emitter, 'owner': owner_source,
+                                      'executable': executable}[change]
+                            target.write_bytes(target.read_bytes() + b'\n')
+                        elif change == 'raw':
+                            (self.output / run['streams']['stdout']['name']).write_bytes(b'changed\n')
+                        elif change == 'wrong-executable':
+                            bodies['stdout'] = bodies['stdout'].replace(str(executable).encode(), b'/wrong')
+                        else:
+                            bodies['stdout'] = bodies['stdout'].replace(
+                                b'"prefix":' + json.dumps(str(self.inputs)).encode(), b'"prefix":"/absent-prefix"')
+                    return bodies
+
+                stack.enter_context(patch.object(owner, '_interpreter_raw', side_effect=mutate))
+                with self.assertRaises(census_tools.Incomplete):
+                    self.observation(owner, executable, support)
+                self.assert_child_closed(owner)
+                self.assertFalse((self.output / 'interpreter.complete.json').exists())
+
+    def test_interpreter_launch_source_and_environment_bounds_are_prespawn(self):
+        for change in ('source', 'environment'):
+            with self.subTest(change=change), ExitStack() as stack:
+                self.output = self.outputs / change
+                emitter = self.inputs / 'observer.py'
+                emitter.write_bytes(b'#' * 16385)
+                if change == 'source':
+                    stack.enter_context(patch.object(census_tools, 'OBSERVER', emitter))
+                else:
+                    stack.enter_context(patch.object(census_tools, 'ENVIRONMENT', {'X': 'x' * 8192}))
+                owner, executable, support, _literal = self.interpreter_fixture()
+                with self.assertRaisesRegex(census_tools.Incomplete, 'byte cap'):
+                    self.observation(owner, executable, support)
+                self.assertEqual(owner.runs, [])
+
+    def test_interpreter_raw_completion_publication_failure(self):
+        owner, executable, support, _literal = self.interpreter_fixture()
+        original = owner.document
+
+        def fail(name, value):
+            if name == 'tools/0001.complete.json':
+                raise OSError('fixture raw completion')
+            return original(name, value)
+
+        with patch.object(owner, 'document', side_effect=fail):
+            with self.assertRaisesRegex(census_tools.Incomplete, 'publication'):
+                self.observation(owner, executable, support)
+        self.assert_child_closed(owner)
+        self.assertFalse(owner.runs[0]['complete'])
+        self.assertFalse((self.output / 'interpreter.complete.json').exists())
+
+    def test_interpreter_final_directory_sync_uncertainty_returns_no_value(self):
+        owner, executable, support, _literal = self.interpreter_fixture()
+        original = os.fsync
+
+        def fail(descriptor):
+            if (self.output / 'interpreter.complete.json').exists():
+                raise OSError('fixture final directory sync')
+            return original(descriptor)
+
+        with patch.object(census_tools.os, 'fsync', side_effect=fail):
+            with self.assertRaisesRegex(census_tools.Incomplete, 'publication'):
+                self.observation(owner, executable, support)
+        self.assert_child_closed(owner)
+        self.assertFalse((self.output / 'interpreter.complete.json').exists())
+
+    def test_interpreter_parent_identity_bool_refuses(self):
+        owner, executable, support, _literal = self.interpreter_fixture()
+        original = owner.resolved
+
+        def identity_bool(path):
+            target, row = original(path)
+            if row['kind'] != 'absent':
+                row = {**row, 'before': {**row['before'], 'st_uid': False}}
+            return target, row
+
+        with patch.object(owner, 'resolved', side_effect=identity_bool):
+            with self.assertRaisesRegex(census_tools.Incomplete, 'exact integers'):
+                self.observation(owner, executable, support)
+        self.assert_child_closed(owner)
+        self.assertFalse((self.output / 'interpreter.complete.json').exists())
 
     def metadata_fixture(self, body):
         executable = self.inputs / 'owned-readelf'
@@ -528,7 +862,7 @@ Dynamic section at offset 0x100 contains 3 entries:
                    'sha256': hashlib.sha256(value).hexdigest()}
             (self.output / raw['name']).write_bytes(value)
             streams[name] = raw
-        run = {'complete': True, 'returncode': 0, 'reaped': True, 'group_closed': True,
+        run = {'operation': 'cache', 'complete': True, 'returncode': 0, 'reaped': True, 'group_closed': True,
                'subjects': [str(subject)], 'argv': ['/usr/sbin/ldconfig', '--print-cache', '-C', archive],
                'streams': streams}
         self.assertEqual(owner.metadata_facts(run), {
