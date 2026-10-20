@@ -1,0 +1,85 @@
+{
+  "status": "closed-failed-info-unit-after-daemon-native-expiry-and-owned-slice-stop",
+  "recordedAt": "2026-10-20T05:58:08.611990+00:00",
+  "inspector": "root coordinator uid1000",
+  "source": "ba85de0b26729d288d0f44c50d133bd30724b003",
+  "fixedIntent": "/home/zack/.codex/orchestrate/vespiary-goal330/reviews/daemon-only-pending-b7a6306f20fabfaab02a29eaecf04531.json",
+  "fixedIntentSHA256": "ebcaf7b08da831f690a8666a7b0dce3c9263d967fd55a7ecce6940c3cadb63c8",
+  "boot": "a0b03e42-3394-4bbd-acee-70a20c745b4b",
+  "stableInputPaths": 13695,
+  "verifiedUniqueBlobs": 13019,
+  "preflight": 0,
+  "bootstrap": 1,
+  "failure": "StartTransientUnit InvalidArgs for StandardOutput=file:.../info.json; no Info observation",
+  "currentNative": [
+    {
+      "name": "vesverifyb7a6306f20fabfaab02a29eaecf04531.slice",
+      "properties": {
+        "LoadState": "loaded",
+        "ActiveState": "inactive",
+        "SubState": "dead",
+        "Job": "",
+        "InvocationID": "91aa0bc7db214bce9cfcb1dfd068d153",
+        "ControlGroup": ""
+      }
+    },
+    {
+      "name": "vesverifyb7a6306f20fabfaab02a29eaecf04531-daemon.service",
+      "properties": {
+        "LoadState": "loaded",
+        "ActiveState": "failed",
+        "SubState": "failed",
+        "Job": "",
+        "InvocationID": "0475832c78c94166a89caabe14f5b1ab",
+        "MainPID": "0",
+        "Result": "timeout",
+        "ControlGroup": ""
+      }
+    },
+    {
+      "name": "vesverifyb7a6306f20fabfaab02a29eaecf04531-info.service",
+      "properties": {
+        "LoadState": "not-found",
+        "ActiveState": "inactive",
+        "SubState": "dead",
+        "Job": "",
+        "InvocationID": "",
+        "MainPID": "0",
+        "Result": "success",
+        "ControlGroup": ""
+      }
+    }
+  ],
+  "ownedCgroupsAbsent": [
+    "/user.slice/user-1000.slice/user@1000.service/vesverifyb7a6306f20fabfaab02a29eaecf04531.slice",
+    "/user.slice/user-1000.slice/user@1000.service/vesverifyb7a6306f20fabfaab02a29eaecf04531.slice/vesverifyb7a6306f20fabfaab02a29eaecf04531-daemon.service"
+  ],
+  "knownPidsAbsent": [
+    839775,
+    839776
+  ],
+  "pidLimit": "Keeper start2670430 recorded; daemon main start not sampled; no complete live descendant/ns identity census before Info failure. Exact cgroup closure relies on reviewed native inheritance contract.",
+  "privateSocketsAbsent": [
+    "/run/user/1000/vesverifyb7a6306f20fabfaab02a29eaecf04531/docker.sock",
+    "/run/user/1000/vesverifyb7a6306f20fabfaab02a29eaecf04531/exec/containerd/containerd.sock",
+    "/run/user/1000/vesverifyb7a6306f20fabfaab02a29eaecf04531/exec/containerd/containerd-debug.sock",
+    "/run/user/1000/vesverifyb7a6306f20fabfaab02a29eaecf04531/rootlesskit/api.sock"
+  ],
+  "observerMountsContainPrivatePaths": false,
+  "nativeDaemonResult": "timeout after original180s RuntimeMax, no manual daemon stop",
+  "ownedSliceSuccessfulStopJob": "/org/freedesktop/systemd1/job/5095",
+  "actualLock": {
+    "device": 54,
+    "inode": 4045,
+    "acquiredUnlockedClosed": true
+  },
+  "retainedPrivatePaths": [
+    "/home/zack/.local/share/vesverifyb7a6306f20fabfaab02a29eaecf04531",
+    "/run/user/1000/vesverifyb7a6306f20fabfaab02a29eaecf04531"
+  ],
+  "outsideNamespaceHolders": "unmeasured under explicit no-external-acquisition assumption",
+  "acceptance": false,
+  "limit": "Failed first attempt is recovered for further scheduling only. No private Info, detached-nsfs, normal daemon teardown, keeper-loss qualification, Go or Goal acceptance. Existing nonce and fixed intent are consumed and must never be rerun.",
+  "fixedRootCompanion": "/home/zack/.codex/orchestrate/vespiary-goal330/reviews/daemon-only-root-closed-b7a6306f20fabfaab02a29eaecf04531.json",
+  "fixedRootCompanionSHA256": "ca886a98bc8197e79271bfe82b94d875802e79123eff97277a71d4d595273847"
+}
