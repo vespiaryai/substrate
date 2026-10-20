@@ -133,7 +133,8 @@ def import_only():
     modules = {}
     for name, module in sorted(sys.modules.items()):
         origin = getattr(getattr(module, "__spec__", None), "origin", None)
-        row = {"origin": origin, "search": list(getattr(module, "__path__", []))}
+        package_path = getattr(module, "__path__", None)
+        row = {"origin": origin, "search": None if package_path is None else list(package_path)}
         if origin and origin.endswith(tuple(importlib.machinery.EXTENSION_SUFFIXES)):
             body = read_bounded(Path(origin), MAX_FILE)
             row.update(size=len(body), sha256=hashlib.sha256(body).hexdigest())

@@ -506,6 +506,9 @@ class CustodyAndEntryTest(unittest.TestCase):
             self.assertEqual(evidence["completion"], service)
             self.assertEqual(evidence["buffers"]["info.json"], {
                 "size": len(raw), "sha256": native.hashlib.sha256(raw).hexdigest(), "raw": raw.hex()})
+            observation = native.Observation(self.owner, self.source, self.host, "fixture observer mount\n",
+                                             clients=[evidence])
+            self.assertEqual(native.client_buffer(observation, "info.json"), raw)
             for key, value in (("ExecMainPID", 999), ("ExecMainCode", 2), ("ExecMainStatus", 1), ("Result", "failed")):
                 with self.subTest(key=key), patch.object(native, "properties", return_value={**service, key: value}), self.assertRaisesRegex(RuntimeError, "completion"):
                     self.attempt.completed_client(self.info)
@@ -513,6 +516,37 @@ class CustodyAndEntryTest(unittest.TestCase):
                     failed = self.attempt.client_output(self.info)
                     self.assertIsNotNone(failed["join_error"])
                     self.assertEqual(failed["buffers"]["info.json"]["raw"], raw.hex())
+        real_read = native.read_bounded
+        for unit, kind, stem in ((self.info, "docker", "info"), (self.api, "rootlesskit", "rootlesskit-status")):
+            current_witness = {**witness, "unit": unit.unit, "invocation": unit.invocation.hex(),
+                               "argv": native.client_argv(kind, self.attempt.p, self.attempt.r)}
+            (self.attempt.p / f"{kind}-entry.json").write_text(json.dumps(current_witness))
+            stdout = self.attempt.p / f"{stem}.json"
+            stdout.write_bytes(raw if kind == "docker" else b"200")
+            if kind == "rootlesskit":
+                (self.attempt.p / "rootlesskit-info.json").write_bytes(b'{"fixture":true}')
+            stderr = self.attempt.p / f"{stem}.stderr"
+            for failure in ("missing", "denied"):
+                with self.subTest(kind=kind, failure=failure):
+                    stderr.write_bytes(b"owned fixture stderr\n")
+                    if failure == "missing":
+                        stderr.unlink()
+                    def read(path, limit):
+                        if path == stderr and failure == "denied":
+                            raise PermissionError("owned stderr capture denied")
+                        return real_read(path, limit)
+                    with patch.object(native, "read_bounded", side_effect=read), patch.object(
+                        native, "properties", return_value=service
+                    ), patch.object(native.Attempt, "identity", return_value=unit):
+                        evidence = self.attempt.client_output(unit)
+                    self.assertIsNone(evidence["join_error"])
+                    self.assertEqual(evidence["completion"], service)
+                    self.assertIn("error", evidence["buffers"][stderr.name])
+                    self.assertEqual(evidence["buffers"][stdout.name]["raw"], stdout.read_bytes().hex())
+                    observation = native.Observation(self.owner, self.source, self.host, "fixture observer mount\n")
+                    observation.clients.append(evidence)
+                    with self.assertRaisesRegex(RuntimeError, "required client output capture failed"):
+                        native.client_buffer(observation, stdout.name)
 
 
 class JobSetupFinalizerTest(unittest.TestCase):
@@ -576,12 +610,24 @@ class NativeInputProfileTest(unittest.TestCase):
                     entry.checked_profile()
 
     def test_import_only_does_not_construct_attempt_or_call_operations(self):
+        class NoPackagePath:
+            __spec__ = None
+        class NonePackagePath(NoPackagePath):
+            __path__ = None
+        class PackagePath(NoPackagePath):
+            __path__ = ("/owned/package",)
         with patch.object(entry, "checked_profile", return_value={"application_enabled": False}), patch.object(
-            entry, "load_owners") as load, patch.object(entry.sys, "stdout") as output:
+            entry, "load_owners") as load, patch.object(entry.sys, "stdout") as output, patch.dict(
+            entry.sys.modules, {"owned_absent_path": NoPackagePath(), "owned_none_path": NonePackagePath(),
+                                "owned_package_path": PackagePath()}):
             entry.import_only()
             load.assert_called_once_with({"application_enabled": False}, True)
             load.return_value.Attempt.assert_not_called()
             output.buffer.write.assert_called_once()
+            report = json.loads(output.buffer.write.call_args.args[0])
+            self.assertEqual(report["modules"]["owned_none_path"], {"origin": None, "search": None})
+            self.assertEqual(report["modules"]["owned_absent_path"], {"origin": None, "search": None})
+            self.assertEqual(report["modules"]["owned_package_path"], {"origin": None, "search": ["/owned/package"]})
 
 
 class OwnedHolderTest(unittest.TestCase):

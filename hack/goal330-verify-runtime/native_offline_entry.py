@@ -86,24 +86,77 @@ def snapshot(entry, destination):
     destination.mkdir(mode=0o700)
     manifest = entry.PROFILE.with_name("native-api-inputs.sha256")
     raw = entry.read_bounded(manifest, 1048576)
-    paths = [manifest]
+    profile_raw = entry.read_bounded(entry.PROFILE, 1048576)
+    profile = json.loads(profile_raw)
+    paths = {manifest, entry.PROFILE}
     for line in raw.decode().splitlines():
         _digest, name = line.split("  ", 1)
         path = Path(name)
-        paths.append(path if path.is_absolute() else HERE.parents[1] / path)
-    result = {}
-    remaining = entry.MAX_TOTAL
-    for path in paths:
-        body = raw if path == manifest else entry.read_bounded(path, min(remaining, entry.MAX_FILE))
-        remaining -= len(body)
+        paths.add(path if path.is_absolute() else HERE.parents[1] / path)
+    paths.update(Path(name) for name in profile["files"])
+    if len(paths) > 4096:
+        raise RuntimeError("offline input union exceeds bound")
+    result = {"files": {}, "links": {}, "membership": {}, "absences": {}}
+    remaining = entry.MAX_TOTAL - len(raw) - len(profile_raw)
+    if remaining < 0:
+        raise RuntimeError("offline documents exceed aggregate bound")
+    for path in sorted(paths):
+        if path == manifest:
+            body = raw
+        elif path == entry.PROFILE:
+            body = profile_raw
+        else:
+            body = entry.read_bounded(path, min(remaining, entry.MAX_FILE))
+            remaining -= len(body)
         digest = hashlib.sha256(body).hexdigest()
-        result[str(path)] = digest
-        for index in range(0, len(body), 4194304):
-            archive = destination / f"{len(result):04d}-{index // 4194304:04d}-{digest}.raw"
+        metadata = path.stat()
+        result["files"][str(path)] = {"sha256": digest, "size": len(body), "mode": metadata.st_mode,
+                                       "uid": metadata.st_uid, "gid": metadata.st_gid,
+                                       "device": metadata.st_dev, "inode": metadata.st_ino,
+                                       "mtime_ns": metadata.st_mtime_ns}
+        for index in range(0, max(1, len(body)), 4194304):
+            archive = destination / f"{len(result['files']):04d}-{index // 4194304:04d}-{digest}.raw"
             with archive.open("xb") as stream:
                 stream.write(body[index:index + 4194304])
+    for directory in profile["membership"]:
+        names = []
+        with os.scandir(directory) as entries:
+            for item in entries:
+                if len(names) >= 4096:
+                    raise RuntimeError("offline membership exceeds bound")
+                names.append(item.name)
+        result["membership"][directory] = sorted(names)
+    for name in profile["required_absences"]:
+        result["absences"][name] = not os.path.lexists(name)
+    pending = list(paths) + [Path(name) for name in profile["membership"]] + [
+        Path(name).parent for name in profile["required_absences"]]
+    seen = set()
+    while pending:
+        path = pending.pop()
+        if path in seen:
+            continue
+        if len(seen) >= 32768:
+            raise RuntimeError("offline link census exceeds bound")
+        seen.add(path)
+        if path.is_symlink():
+            target = os.readlink(path)
+            if len(os.fsencode(target)) > 4096 or len(result["links"]) >= 4096:
+                raise RuntimeError("offline link target exceeds bound")
+            metadata = path.lstat()
+            result["links"][str(path)] = {"target": target, "mode": metadata.st_mode,
+                                          "uid": metadata.st_uid, "gid": metadata.st_gid,
+                                          "device": metadata.st_dev, "inode": metadata.st_ino,
+                                          "mtime_ns": metadata.st_mtime_ns}
+            pending.append(Path(os.path.abspath(path.parent / target)))
+        if path != path.parent:
+            pending.append(path.parent)
+    encoded = json.dumps(result, sort_keys=True)
+    if len(encoded.encode()) > 1048576:
+        raise RuntimeError("offline snapshot map exceeds bound")
     with (destination / "map.json").open("x") as stream:
-        json.dump(result, stream, sort_keys=True)
+        stream.write(encoded)
+    if (result["membership"] != profile["membership"] or not all(result["absences"].values())):
+        raise RuntimeError("offline profile membership or absence changed")
     return result
 
 
@@ -120,15 +173,23 @@ def guard_fixture(changed):
         directory.mkdir(mode=0o700)
         with path.open("xb") as stream:
             stream.write(b"fixed source\n")
+        with (directory / "profile.json").open("x") as stream:
+            json.dump({"files": {str(path): hashlib.sha256(b"fixed source\n").hexdigest()},
+                       "membership": {}, "required_absences": []}, stream, sort_keys=True)
+        with (directory / "native-api-inputs.sha256").open("x") as stream:
+            stream.write("")
     elif entry.read_bounded(path, 1024) != b"fixed source\n":
         raise RuntimeError("restore the owned guard fixture separately before stable proof")
-    before = entry.read_bounded(path, 1024)
+    entry.PROFILE = directory / "profile.json"
+    label = "refusal" if changed else "stable"
+    before = snapshot(entry, directory / f"{label}-before")
     if changed:
         path.write_bytes(b"changed source\n")
-    after = entry.read_bounded(path, 1024)
-    print(json.dumps({"before": {"raw": before.hex(), "sha256": hashlib.sha256(before).hexdigest()},
-                      "after": {"raw": after.hex(), "sha256": hashlib.sha256(after).hexdigest()}}, sort_keys=True))
-    require_stable(hashlib.sha256(before).hexdigest(), hashlib.sha256(after).hexdigest())
+    after = snapshot(entry, directory / f"{label}-after")
+    if str(path) not in before["files"] or str(path) not in after["files"]:
+        raise RuntimeError("guard fixture omitted the profile-only input")
+    print(json.dumps({"before": before, "after": after}, sort_keys=True))
+    require_stable(before, after)
 
 
 def suite():

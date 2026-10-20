@@ -857,6 +857,8 @@ def client_buffer(observation, name):
     evidence = next(row for row in observation.clients if name in row["buffers"])
     if evidence["join_error"] is not None:
         raise RuntimeError("client output lacks positive completion join")
+    if any("error" in buffer for buffer in evidence["buffers"].values()):
+        raise RuntimeError("required client output capture failed")
     return bytes.fromhex(evidence["buffers"][name]["raw"])
 
 
