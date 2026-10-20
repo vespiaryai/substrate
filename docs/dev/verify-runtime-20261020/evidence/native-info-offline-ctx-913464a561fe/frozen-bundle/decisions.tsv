@@ -1,0 +1,4 @@
+ts	phase	decision	why	evidence	result
+2026-10-20T06:22:00Z	prepare	Reuse qualified owner with thirteen current source paths	Preserve complete original coverage and current candidate without checking historical helper hashes	source.sha256	source-only
+2026-10-20T06:22:01Z	prepare	Move existing guard controls before suites	The task requires restored fixture bytes before test work	qualify.py	source-only
+2026-10-20T06:22:02Z	gate	Defer imports and all runtime work	Root must inspect the frozen bundle and grant one exact batch	proposed-command.sh	UNRUN

@@ -1,0 +1,49 @@
+{
+  "status": "closed-28-offline-cases-and-guard-controls-passed",
+  "recordedAt": "2026-10-20T06:28:45.441935+00:00",
+  "source": "4a80b72c48069d60ac9ecd351751474caecba1e1",
+  "archiveSHA256": "1454ec9d21c8fa6e48d2000ffc917cc90ccece57c11c65dfd486dc42831c0370",
+  "actualArchiveFilesCompared": 250,
+  "actualCompleteInputHashPaths": 13625,
+  "actualSourceBytePairs": 13,
+  "guardCases": 28,
+  "guardControlExits": [
+    0,
+    97,
+    0
+  ],
+  "unit": "goal330-daemon-native-info-offline-ctx-913464a561fe.service",
+  "InvocationID": "098b7d15fd0b44a4be38bf3ff20c48f3",
+  "rootActualActiveSamples": 64,
+  "rootActualLockRefusals": 78,
+  "currentNative": {
+    "LoadState": "not-found",
+    "ActiveState": "inactive",
+    "SubState": "dead",
+    "Job": "",
+    "MainPID": "0",
+    "ControlGroup": ""
+  },
+  "ownedCgroupAbsent": true,
+  "rootObservedPIDStartsGone": [
+    [
+      883108,
+      "2875072"
+    ],
+    [
+      883128,
+      "2875113"
+    ]
+  ],
+  "rootObservedGroupsGone": [
+    883107,
+    883128
+  ],
+  "actualLock": {
+    "device": 54,
+    "inode": 4045,
+    "acquiredUnlockedClosed": true
+  },
+  "acceptance": "offline regression only",
+  "limit": "Full repository/native blobs are not inside portable archive; root compared current actual end hashes and preserved before/after maps, plus13source byte pairs. Native cgroup closure supports unobserved inherited children; no complete live descendant census. No actual daemon/Info/open/job/security/nsfs/normal-teardown/keeper-loss/Go/Goal qualification."
+}

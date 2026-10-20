@@ -1,0 +1,1100 @@
+[
+  {
+    "status": "closed-eight-synthetic-controls-passed",
+    "recordedAt": "2026-10-20T04:36:53.554005+00:00",
+    "unit": "vespiary-accepted-spec-regression-ctx-b5cf4042534e.service",
+    "native": {
+      "LoadState": "not-found",
+      "ActiveState": "inactive",
+      "SubState": "dead",
+      "Job": "",
+      "MainPID": "0",
+      "ControlGroup": ""
+    },
+    "inputRecordsAndBothTarBytesVerified": 2879,
+    "guardRecordsStable": 2820,
+    "oldExpectedFailures": 4,
+    "correctedPasses": 4,
+    "sampledPIDsAbsent": 26,
+    "recordedProcessGroupsAbsent": 17,
+    "exactCgroupAbsent": true,
+    "actualExclusiveFlockAcquiredUnlockedClosed": {
+      "device": 54,
+      "inode": 4045
+    },
+    "scope": "Synthetic private-lock/manager-seam regression only; two actual native controls and focused runs still pending."
+  },
+  {
+    "status": "closed-incomplete-native-control-observer-denied",
+    "recordedAt": "2026-10-20T05:01:25.425913+00:00",
+    "inspector": "root coordinator uid1000",
+    "unit": "vespiary-accepted-spec-containment-lock-786109.service",
+    "native": {
+      "LoadState": "not-found",
+      "ActiveState": "inactive",
+      "SubState": "dead",
+      "Job": "",
+      "MainPID": "0",
+      "ControlGroup": ""
+    },
+    "boundCgroup": "/user.slice/user-1000.slice/user@1000.service/app.slice/vespiary-accepted-spec-containment-lock-786109.service",
+    "cgroupAbsentParentAccessible": true,
+    "pidsAbsent": [
+      786107,
+      786109,
+      786110,
+      786221
+    ],
+    "inputsStable": true,
+    "archivedFilesPerPhase": 2876,
+    "actualLock": {
+      "device": 54,
+      "inode": 4045,
+      "acquiredUnlockedClosed": true
+    },
+    "acceptedNativeProof": false,
+    "limit": "One control ran, wrapper acceptedtrue/driver0, outside observer denied fd metadata before live sample persisted and raw outer exit; second control never ran. No retry authorization."
+  },
+  {
+    "status": "closed-positive-passed-negative-observer-path-oracle-failed",
+    "recordedAt": "2026-10-20T05:24:44.416329+00:00",
+    "inspector": "root coordinator uid1000",
+    "controls": [
+      {
+        "name": "containment-lock-native-r2",
+        "rawExit": 0,
+        "wrapperAccepted": true,
+        "unit": "vespiary-accepted-spec-containment-lock-native-r2-815021.service",
+        "native": {
+          "LoadState": "not-found",
+          "ActiveState": "inactive",
+          "SubState": "dead",
+          "Job": "",
+          "MainPID": "0",
+          "ControlGroup": ""
+        },
+        "boundCgroupAbsent": "/user.slice/user-1000.slice/user@1000.service/app.slice/vespiary-accepted-spec-containment-lock-native-r2-815021.service",
+        "observedPidsAbsent": [
+          815018,
+          815021,
+          815100
+        ],
+        "observedGroupsAbsent": [
+          815018,
+          815100
+        ],
+        "stableArchiveMembersPerPhase": 2877,
+        "liveNativeSamples": 4,
+        "error": null,
+        "completeObserverResult": true
+      },
+      {
+        "name": "containment-missing-owner-native-r2",
+        "rawExit": 98,
+        "wrapperAccepted": false,
+        "unit": "vespiary-accepted-spec-containment-missing-owner-native-r2-815175.service",
+        "native": {
+          "LoadState": "not-found",
+          "ActiveState": "inactive",
+          "SubState": "dead",
+          "Job": "",
+          "MainPID": "0",
+          "ControlGroup": ""
+        },
+        "boundCgroupAbsent": "/user.slice/user-1000.slice/user@1000.service/app.slice/vespiary-accepted-spec-containment-missing-owner-native-r2-815175.service",
+        "observedPidsAbsent": [
+          815173,
+          815175,
+          815235
+        ],
+        "observedGroupsAbsent": [
+          815173,
+          815235
+        ],
+        "stableArchiveMembersPerPhase": 2877,
+        "liveNativeSamples": 3,
+        "error": "FileNotFoundError(2, 'No such file or directory')",
+        "completeObserverResult": false
+      }
+    ],
+    "actualLock": {
+      "device": 54,
+      "inode": 4045,
+      "acquiredUnlockedClosed": true
+    },
+    "limit": "Positive real native control passed. Negative raw98/acceptedfalse and positive cleanup observed, but repr lacks missing filename and observer path assertion failed. No complete negative reason acceptance or broader qualification."
+  },
+  {
+    "status": "closed-five-pure-controls-and-native-negative-passed",
+    "recordedAt": "2026-10-20T05:47:23.104549+00:00",
+    "inspector": "root coordinator uid1000",
+    "source": "04c26c09ddbda5348dc794c8351fa95a27fcf8da",
+    "pureCases": 5,
+    "guardArchives": [
+      {
+        "name": "missing-owner-error-unit-r3",
+        "stableGuardArchiveMembersPerPhase": 2725
+      },
+      {
+        "name": "containment-missing-owner-native-r3",
+        "stableGuardArchiveMembersPerPhase": 2725
+      }
+    ],
+    "negativeInputArchiveMembersPerPhase": 2880,
+    "negativeStructuredError": {
+      "operation": "read-owner-receipt",
+      "errorType": "FileNotFoundError",
+      "errno": 2,
+      "filename": "/home/zack/orca/workspaces/vespiary-continuation/goal330-accepted-spec-fixture-fix/docs/wayfinder/effect-evidence/accepted-spec-fixture-20261020/containment-missing-owner-native-r3-outer/owner.json"
+    },
+    "negativeResult": {
+      "name": "containment-missing-owner-native-r3",
+      "expectedOutcomeObserved": true,
+      "rawExit": 98,
+      "accepted": false,
+      "runningNativeSamples": 3,
+      "canonicalLockRefusals": 115,
+      "processIdentities": 3,
+      "frozenInputs": 2880,
+      "nativeClosurePositive": true,
+      "actualSameInodeRelease": true,
+      "outsideFDTableObserved": false
+    },
+    "currentNativeClosure": [
+      {
+        "unit": "vespiary-accepted-spec-missing-owner-error-unit-r3-834179.service",
+        "properties": {
+          "LoadState": "not-found",
+          "ActiveState": "inactive",
+          "SubState": "dead",
+          "Job": "",
+          "MainPID": "0",
+          "ControlGroup": ""
+        },
+        "boundCgroupAbsent": "/user.slice/user-1000.slice/user@1000.service/app.slice/vespiary-accepted-spec-missing-owner-error-unit-r3-834179.service"
+      },
+      {
+        "unit": "vespiary-accepted-spec-containment-missing-owner-native-r3-835160.service",
+        "properties": {
+          "LoadState": "not-found",
+          "ActiveState": "inactive",
+          "SubState": "dead",
+          "Job": "",
+          "MainPID": "0",
+          "ControlGroup": ""
+        },
+        "boundCgroupAbsent": "/user.slice/user-1000.slice/user@1000.service/app.slice/vespiary-accepted-spec-containment-missing-owner-native-r3-835160.service"
+      }
+    ],
+    "pidsAbsent": [
+      834179,
+      834278,
+      835158,
+      835160,
+      835220
+    ],
+    "groupsAbsent": [
+      834278,
+      835158,
+      835220
+    ],
+    "driverStartIdentityLimit": "834179 start ticks not captured; current PID absent and exact unit/cgroup closed",
+    "actualLock": {
+      "device": 54,
+      "inode": 4045,
+      "acquiredUnlockedClosed": true
+    },
+    "combinedGate": "New negative plus prior accepted r2 positive qualify the native containment controls only. Focused6/full78/P1a29/adoption remain unproved."
+  },
+  {
+    "status": "closed-first-three-children-passed-external-observer-literal-failed-batch-stopped",
+    "recordedAt": "2026-10-20T06:09:21.110796+00:00",
+    "results": [
+      {
+        "name": "consolidated-python8",
+        "rawChildGuardExit": 0,
+        "cases": 8,
+        "sourceMembersPerPhase": 2725,
+        "extraInputMembersPerPhase": 399,
+        "knownProcessIdentities": 8,
+        "liveSamples": 17,
+        "InvocationID": "a210c0a71b274a0ea30be8fd76ad1d11",
+        "currentNative": {
+          "LoadState": "not-found",
+          "ActiveState": "inactive",
+          "SubState": "dead",
+          "Job": "",
+          "MainPID": "0",
+          "ControlGroup": ""
+        },
+        "cgroupAbsent": true,
+        "recordedProcessesAndGroupsGone": true
+      },
+      {
+        "name": "consolidated-native-routing-control",
+        "rawChildGuardExit": 0,
+        "cases": 1,
+        "sourceMembersPerPhase": 2725,
+        "extraInputMembersPerPhase": 399,
+        "knownProcessIdentities": 3,
+        "liveSamples": 7,
+        "InvocationID": "a717f7e3b0e94da79571b412717fcacd",
+        "currentNative": {
+          "LoadState": "not-found",
+          "ActiveState": "inactive",
+          "SubState": "dead",
+          "Job": "",
+          "MainPID": "0",
+          "ControlGroup": ""
+        },
+        "cgroupAbsent": true,
+        "recordedProcessesAndGroupsGone": true
+      },
+      {
+        "name": "consolidated-fixture-lifetime",
+        "rawChildGuardExit": 0,
+        "cases": 30,
+        "sourceMembersPerPhase": 2726,
+        "extraInputMembersPerPhase": 399,
+        "knownProcessIdentities": 50,
+        "liveSamples": 1402,
+        "InvocationID": "da6a617ab41840ac9efe76410d7dc8f2",
+        "currentNative": {
+          "LoadState": "not-found",
+          "ActiveState": "inactive",
+          "SubState": "dead",
+          "Job": "",
+          "MainPID": "0",
+          "ControlGroup": ""
+        },
+        "cgroupAbsent": true,
+        "recordedProcessesAndGroupsGone": true
+      }
+    ],
+    "originalObserverSHA256": "255218d56358e634faf5e3f218d6a49644df755244b7e959f6b8d85e3267776c",
+    "originalStopped": {
+      "error": "AssertionError()",
+      "retryAuthorized": false,
+      "nextCommandAuthorized": false
+    },
+    "acceptedPartialProof": true,
+    "remainingCommandsUnrun": [
+      "consolidated-types",
+      "consolidated-cohort",
+      "consolidated-adoption"
+    ],
+    "actualLock": {
+      "device": 54,
+      "inode": 4045,
+      "acquiredUnlockedClosed": true
+    },
+    "limit": "Root independently audited existing bytes with correct __tests__ path. Original observer remains failed and unchanged. No rerun, new child, full78, PR503 or whole-batch acceptance."
+  },
+  {
+    "status": "closed-preflight-denied-no-bootstrap",
+    "recordedAt": "2026-10-20T04:52:29.092589+00:00",
+    "inspector": "root coordinator uid1000",
+    "bootstrapExecuted": false,
+    "mutationRecord": [],
+    "guardMapsEqual": true,
+    "units": [
+      {
+        "unit": "vesverifyb7a6306f20fabfaab02a29eaecf04531.slice",
+        "properties": {
+          "LoadState": "loaded",
+          "ActiveState": "inactive",
+          "SubState": "dead",
+          "Job": "",
+          "ControlGroup": ""
+        }
+      },
+      {
+        "unit": "vesverifyb7a6306f20fabfaab02a29eaecf04531-daemon.service",
+        "properties": {
+          "LoadState": "not-found",
+          "ActiveState": "inactive",
+          "SubState": "dead",
+          "Job": "",
+          "MainPID": "0",
+          "ControlGroup": ""
+        }
+      },
+      {
+        "unit": "vesverifyb7a6306f20fabfaab02a29eaecf04531-info.service",
+        "properties": {
+          "LoadState": "not-found",
+          "ActiveState": "inactive",
+          "SubState": "dead",
+          "Job": "",
+          "MainPID": "0",
+          "ControlGroup": ""
+        }
+      }
+    ],
+    "jobs": "",
+    "privatePathsAbsent": [
+      "/home/zack/.local/share/vesverifyb7a6306f20fabfaab02a29eaecf04531",
+      "/run/user/1000/vesverifyb7a6306f20fabfaab02a29eaecf04531"
+    ],
+    "fixedIntentAndCompanionsAbsent": true,
+    "actualLock": {
+      "device": 54,
+      "inode": 4045,
+      "acquiredUnlockedClosed": true
+    },
+    "limit": "Preflight denial preserved. No daemon was launched. systemctl show can load the implicit slice; it is inactive with empty cgroup and job. No global namespace absence claim."
+  },
+  {
+    "status": "closed-fourteen-mocks-passed",
+    "recordedAt": "2026-10-20T04:26:52.910667+00:00",
+    "pending": "daemon-mock-pending.json",
+    "unit": "goal330-daemon-mock-ctx-0e9c6c88257c.service",
+    "native": {
+      "LoadState": "not-found",
+      "ActiveState": "inactive",
+      "SubState": "dead",
+      "Job": "",
+      "MainPID": "0",
+      "ControlGroup": ""
+    },
+    "exactCgroupAndRecordedPIDsAbsent": true,
+    "actualExclusiveFlockAcquiredUnlockedClosed": {
+      "device": 54,
+      "inode": 4045
+    },
+    "suiteCases": 14,
+    "guardControlExits": [
+      0,
+      97,
+      0
+    ],
+    "scope": "Mocks only. Real daemon and owner-loss unrun."
+  },
+  {
+    "status": "closed-failed-info-unit-after-daemon-native-expiry-and-owned-slice-stop",
+    "recordedAt": "2026-10-20T05:58:08.611990+00:00",
+    "inspector": "root coordinator uid1000",
+    "source": "ba85de0b26729d288d0f44c50d133bd30724b003",
+    "fixedIntent": "/home/zack/.codex/orchestrate/vespiary-goal330/reviews/daemon-only-pending-b7a6306f20fabfaab02a29eaecf04531.json",
+    "fixedIntentSHA256": "ebcaf7b08da831f690a8666a7b0dce3c9263d967fd55a7ecce6940c3cadb63c8",
+    "boot": "a0b03e42-3394-4bbd-acee-70a20c745b4b",
+    "stableInputPaths": 13695,
+    "verifiedUniqueBlobs": 13019,
+    "preflight": 0,
+    "bootstrap": 1,
+    "failure": "StartTransientUnit InvalidArgs for StandardOutput=file:.../info.json; no Info observation",
+    "currentNative": [
+      {
+        "name": "vesverifyb7a6306f20fabfaab02a29eaecf04531.slice",
+        "properties": {
+          "LoadState": "loaded",
+          "ActiveState": "inactive",
+          "SubState": "dead",
+          "Job": "",
+          "InvocationID": "91aa0bc7db214bce9cfcb1dfd068d153",
+          "ControlGroup": ""
+        }
+      },
+      {
+        "name": "vesverifyb7a6306f20fabfaab02a29eaecf04531-daemon.service",
+        "properties": {
+          "LoadState": "loaded",
+          "ActiveState": "failed",
+          "SubState": "failed",
+          "Job": "",
+          "InvocationID": "0475832c78c94166a89caabe14f5b1ab",
+          "MainPID": "0",
+          "Result": "timeout",
+          "ControlGroup": ""
+        }
+      },
+      {
+        "name": "vesverifyb7a6306f20fabfaab02a29eaecf04531-info.service",
+        "properties": {
+          "LoadState": "not-found",
+          "ActiveState": "inactive",
+          "SubState": "dead",
+          "Job": "",
+          "InvocationID": "",
+          "MainPID": "0",
+          "Result": "success",
+          "ControlGroup": ""
+        }
+      }
+    ],
+    "ownedCgroupsAbsent": [
+      "/user.slice/user-1000.slice/user@1000.service/vesverifyb7a6306f20fabfaab02a29eaecf04531.slice",
+      "/user.slice/user-1000.slice/user@1000.service/vesverifyb7a6306f20fabfaab02a29eaecf04531.slice/vesverifyb7a6306f20fabfaab02a29eaecf04531-daemon.service"
+    ],
+    "knownPidsAbsent": [
+      839775,
+      839776
+    ],
+    "pidLimit": "Keeper start2670430 recorded; daemon main start not sampled; no complete live descendant/ns identity census before Info failure. Exact cgroup closure relies on reviewed native inheritance contract.",
+    "privateSocketsAbsent": [
+      "/run/user/1000/vesverifyb7a6306f20fabfaab02a29eaecf04531/docker.sock",
+      "/run/user/1000/vesverifyb7a6306f20fabfaab02a29eaecf04531/exec/containerd/containerd.sock",
+      "/run/user/1000/vesverifyb7a6306f20fabfaab02a29eaecf04531/exec/containerd/containerd-debug.sock",
+      "/run/user/1000/vesverifyb7a6306f20fabfaab02a29eaecf04531/rootlesskit/api.sock"
+    ],
+    "observerMountsContainPrivatePaths": false,
+    "nativeDaemonResult": "timeout after original180s RuntimeMax, no manual daemon stop",
+    "ownedSliceSuccessfulStopJob": "/org/freedesktop/systemd1/job/5095",
+    "actualLock": {
+      "device": 54,
+      "inode": 4045,
+      "acquiredUnlockedClosed": true
+    },
+    "retainedPrivatePaths": [
+      "/home/zack/.local/share/vesverifyb7a6306f20fabfaab02a29eaecf04531",
+      "/run/user/1000/vesverifyb7a6306f20fabfaab02a29eaecf04531"
+    ],
+    "outsideNamespaceHolders": "unmeasured under explicit no-external-acquisition assumption",
+    "acceptance": false,
+    "limit": "Failed first attempt is recovered for further scheduling only. No private Info, detached-nsfs, normal daemon teardown, keeper-loss qualification, Go or Goal acceptance. Existing nonce and fixed intent are consumed and must never be rerun.",
+    "fixedRootCompanion": "/home/zack/.codex/orchestrate/vespiary-goal330/reviews/daemon-only-root-closed-b7a6306f20fabfaab02a29eaecf04531.json",
+    "fixedRootCompanionSHA256": "ca886a98bc8197e79271bfe82b94d875802e79123eff97277a71d4d595273847"
+  },
+  {
+    "status": "closed-26-offline-cases-passed",
+    "recordedAt": "2026-10-20T05:33:21.793060+00:00",
+    "inspector": "root coordinator uid1000",
+    "source": "ba85de0b26729d288d0f44c50d133bd30724b003",
+    "caseCount": 26,
+    "caseIds": [
+      "test_daemon_bootstrap.DaemonOnlyTest.test_actual_cgroup_must_be_empty_after_exit",
+      "test_daemon_bootstrap.DaemonOnlyTest.test_daemon_has_finite_native_lifetime",
+      "test_daemon_bootstrap.DaemonOnlyTest.test_denial_is_not_absence",
+      "test_daemon_bootstrap.DaemonOnlyTest.test_entrypoint_refuses_before_runtime_mutation",
+      "test_daemon_bootstrap.DaemonOnlyTest.test_installed_native_unit_contracts",
+      "test_daemon_bootstrap.DaemonOnlyTest.test_native_managed_containerd",
+      "test_daemon_bootstrap.DaemonOnlyTest.test_pending_receipt_refuses_reuse_without_changing_evidence",
+      "test_daemon_bootstrap.DaemonOnlyTest.test_slice_retains_actual_bounds",
+      "test_daemon_bootstrap.DaemonOnlyTest.test_stop_refuses_replaced_invocation_before_mutation",
+      "test_daemon_bootstrap.DaemonOnlyTest.test_zero_object_native_info",
+      "test_daemon_bootstrap.OwnedScopeTest.test_changed_boot_refused",
+      "test_daemon_bootstrap.OwnedScopeTest.test_detached_netns_stat_must_match_owned_nsfs_mount",
+      "test_daemon_bootstrap.OwnedScopeTest.test_escaped_owned_actor_refused",
+      "test_daemon_bootstrap.OwnedScopeTest.test_exported_observer_mount_refused",
+      "test_daemon_bootstrap.OwnedScopeTest.test_live_original_actor_refused_but_pid_reuse_is_not_original",
+      "test_daemon_bootstrap.OwnedScopeTest.test_native_terminal_state_and_job_required",
+      "test_daemon_bootstrap.OwnedScopeTest.test_observer_private_namespace_descriptor_refused",
+      "test_daemon_bootstrap.OwnedScopeTest.test_owned_denial_is_not_absence",
+      "test_daemon_bootstrap.OwnedScopeTest.test_populated_unseen_descendant_refused",
+      "test_daemon_bootstrap.OwnedScopeTest.test_stale_owned_socket_refused",
+      "test_daemon_bootstrap.OwnedScopeTest.test_terminal_service_main_pid_and_native_absence",
+      "test_daemon_bootstrap.OwnedScopeTest.test_unreadable_unrelated_subject_is_never_queried",
+      "test_systemd_job.OwnedJobTest.test_other_job_cannot_complete_owned_job",
+      "test_systemd_job.OwnedJobTest.test_rejects_failed_job",
+      "test_systemd_job.OwnedJobTest.test_requires_exact_successful_job",
+      "test_systemd_job.OwnedJobTest.test_stop_wait_outlasts_native_fifteen_second_stop"
+    ],
+    "sourceBeforeAfterFiles": 11,
+    "preexistingInputsStable": true,
+    "onlyDeclaredAddedFixture": "hack/goal330-verify-runtime/owned-scope-offline-ctx-e8d010585409/guard-refusal.txt",
+    "restoredFixtureSHA256": "1cd263f1102656dd6b6cf1d626d1a96f9eba0406af3cb2a52560d473d4801052",
+    "unit": "goal330-daemon-owned-scope-offline-ctx-e8d010585409.service",
+    "native": {
+      "LoadState": "not-found",
+      "ActiveState": "inactive",
+      "SubState": "dead",
+      "Job": "",
+      "MainPID": "0",
+      "ControlGroup": ""
+    },
+    "boundCgroupAbsent": "/user.slice/user-1000.slice/user@1000.service/app.slice/goal330-daemon-owned-scope-offline-ctx-e8d010585409.service",
+    "observedPidsAbsent": [
+      822319,
+      822332
+    ],
+    "actualNativeLimits": {
+      "cpu.max": "200000 100000",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0",
+      "pids.max": "128"
+    },
+    "guardControls": [
+      0,
+      97,
+      0
+    ],
+    "actualLock": {
+      "device": 54,
+      "inode": 4045,
+      "acquiredUnlockedClosed": true
+    },
+    "limit": "Synthetic owned-scope/job controls only. No actual daemon bootstrap, namespace behavior, keeper-loss, Go product or Goal qualification."
+  },
+  {
+    "status": "closed-passed-root-reader",
+    "recordedAt": "2026-10-20T04:17:00.082232+00:00",
+    "pending": "dropin-root-positive-pending.json",
+    "unit": "goal330-dropin-offline-OwtfRnk8.service",
+    "native": {
+      "LoadState": "not-found",
+      "ActiveState": "inactive",
+      "SubState": "dead",
+      "Job": "",
+      "MainPID": "0",
+      "ControlGroup": ""
+    },
+    "recordedExactIdentitiesAbsent": true,
+    "sourceRecordsAndBothZipArchivesVerified": 1831,
+    "guardRecordsEqual": 1807,
+    "readerExactBytesAndRootMetadataMatch": {
+      "ctimeNs": 1792469359259236447,
+      "device": 54,
+      "gid": 0,
+      "inode": 289351,
+      "links": 1,
+      "mode": 33060,
+      "mtimeNs": 1792468900900716715,
+      "size": 20,
+      "uid": 0
+    },
+    "actualExclusiveFlockAcquiredUnlockedClosed": {
+      "device": 54,
+      "inode": 4045
+    },
+    "scope": "One ordinary-user private root-owned tempfile read, no live qualification."
+  },
+  {
+    "status": "closed-failed-typecheck",
+    "recordedAt": "2026-10-20T04:05:21.986684+00:00",
+    "pending": "postgres-proof-r1-pending.json",
+    "unit": "goal330-postgres-close-ctx-ba3678937d00-proof-r1.service",
+    "native": {
+      "LoadState": "not-found",
+      "ActiveState": "inactive",
+      "SubState": "dead",
+      "Job": "",
+      "MainPID": "0",
+      "ControlGroup": ""
+    },
+    "nativeStdout": "LoadState=not-found\nActiveState=inactive\nSubState=dead\nJob=\nMainPID=0\nControlGroup=\n",
+    "exactCgroupAbsent": "/user.slice/user-1000.slice/user@1000.service/app.slice/goal330-postgres-close-ctx-ba3678937d00-proof-r1.service",
+    "recordedPIDsAbsent": {
+      "driver.pid": 720011,
+      "flock-parent.pid": 720010
+    },
+    "actualExclusiveFlockAcquiredUnlockedClosed": {
+      "device": 54,
+      "inode": 4045
+    },
+    "typesExit": 2,
+    "mapsCount": 28957,
+    "sourceStable": true,
+    "controlsRan": false,
+    "result": "Typecheck failed. No socket baseline matrix was attempted."
+  },
+  {
+    "status": "closed-failed-first-runtime-control",
+    "recordedAt": "2026-10-20T04:56:06.468179+00:00",
+    "inspector": "root coordinator uid1000",
+    "source": "ee049a4cc4fc1ad69864b305be5297eae8cd3c42",
+    "unit": "goal330-postgres-close-ctx-3925e3b36a7c-proof-r2.service",
+    "currentNative": {
+      "LoadState": "not-found",
+      "ActiveState": "inactive",
+      "SubState": "dead",
+      "Job": "",
+      "MainPID": "0",
+      "ControlGroup": ""
+    },
+    "boundCgroup": "/user.slice/user-1000.slice/user@1000.service/app.slice/goal330-postgres-close-ctx-3925e3b36a7c-proof-r2.service",
+    "cgroupAbsentParentReadable": true,
+    "observedPidsAbsent": [
+      774635,
+      774634,
+      774660,
+      775518
+    ],
+    "stableChecks": [
+      {
+        "phase": "build",
+        "guard": {
+          "command": [
+            "/usr/bin/env",
+            "-u",
+            "GIT_INDEX_FILE",
+            "timeout",
+            "--signal=TERM",
+            "--kill-after=5s",
+            "60s",
+            "/home/zack/.local/bin/mise",
+            "exec",
+            "--",
+            "/home/zack/.local/share/mise/installs/node/22.23.2/bin/node",
+            "node_modules/typescript/bin/tsc",
+            "-p",
+            "modules/shared-contracts/tsconfig.json",
+            "--listFiles",
+            "--pretty",
+            "false"
+          ],
+          "command_exit": 0,
+          "files": 28942,
+          "changed": [],
+          "stable": true
+        },
+        "coverage": {
+          "guard_files": 28942,
+          "required_dependencies": 26378,
+          "invalid_dependencies": [],
+          "invalid_critical_inputs": [],
+          "invalid_owned_inputs": [],
+          "stable": true,
+          "changed": []
+        }
+      },
+      {
+        "phase": "types",
+        "guard": {
+          "command": [
+            "/usr/bin/env",
+            "-u",
+            "GIT_INDEX_FILE",
+            "timeout",
+            "--signal=TERM",
+            "--kill-after=5s",
+            "60s",
+            "/home/zack/.local/bin/mise",
+            "exec",
+            "--",
+            "/home/zack/.local/share/mise/installs/node/22.23.2/bin/node",
+            "node_modules/typescript/bin/tsc",
+            "-p",
+            "tsconfig.postgres-close-baseline.json",
+            "--listFiles",
+            "--pretty",
+            "false"
+          ],
+          "command_exit": 0,
+          "files": 29041,
+          "changed": [],
+          "stable": true
+        },
+        "coverage": {
+          "guard_files": 29041,
+          "required_dependencies": 26474,
+          "invalid_dependencies": [],
+          "invalid_critical_inputs": [],
+          "invalid_owned_inputs": [],
+          "stable": true,
+          "changed": []
+        }
+      },
+      {
+        "phase": "controls",
+        "guard": {
+          "command": [
+            "/usr/bin/env",
+            "-u",
+            "GIT_INDEX_FILE",
+            "timeout",
+            "--signal=INT",
+            "--kill-after=5s",
+            "370s",
+            "/home/zack/.local/bin/mise",
+            "exec",
+            "--",
+            "/home/zack/.local/share/mise/installs/node/22.23.2/bin/node",
+            "node_modules/vitest/vitest.mjs",
+            "run",
+            "--config",
+            "vitest.postgres-close-baseline.config.ts",
+            "--reporter=verbose",
+            "--reporter=json",
+            "--outputFile=/tmp/vespiary-postgres-close-baseline-ctx_3925e3b36a7c/proof-r2/vitest-report.json"
+          ],
+          "command_exit": 1,
+          "files": 29041,
+          "changed": [],
+          "stable": true
+        },
+        "coverage": {
+          "guard_files": 29041,
+          "required_dependencies": 26474,
+          "invalid_dependencies": [],
+          "invalid_critical_inputs": [],
+          "invalid_owned_inputs": [],
+          "stable": true,
+          "changed": []
+        }
+      }
+    ],
+    "actualLock": {
+      "device": 54,
+      "inode": 4045,
+      "acquiredUnlockedClosed": true
+    },
+    "limit": "Prerequisite build and focused types passed; only first control attempted, timed out without allocated FD. No physical-close/SQL qualification. 24 alias-name direct map omission preserved as explicit coverage limit."
+  },
+  {
+    "status": "closed-failed-invalidated-controls",
+    "recordedAt": "2026-10-20T05:13:52.130150+00:00",
+    "inspector": "root coordinator uid1000",
+    "unit": "goal330-postgres-close-ctx-a62e92df16c5-proof-r3.service",
+    "native": {
+      "LoadState": "not-found",
+      "ActiveState": "inactive",
+      "SubState": "dead",
+      "Job": "",
+      "MainPID": "0",
+      "ControlGroup": ""
+    },
+    "boundCgroupAbsentParentReadable": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/goal330-postgres-close-ctx-a62e92df16c5-proof-r3.service",
+    "observedPidsAbsent": [
+      799265,
+      799266,
+      799291,
+      799399,
+      799510,
+      799511,
+      799527,
+      799538,
+      799557
+    ],
+    "fixtureLimit": "799557 absent now; live start identity was not captured",
+    "typesMapsStable": true,
+    "controlsGuard": {
+      "command": [
+        "/usr/bin/env",
+        "-u",
+        "GIT_INDEX_FILE",
+        "timeout",
+        "--signal=INT",
+        "--kill-after=5s",
+        "370s",
+        "/home/zack/.local/bin/mise",
+        "exec",
+        "--",
+        "/home/zack/.local/share/mise/installs/node/22.23.2/bin/node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "vitest.postgres-close-baseline.config.ts",
+        "--reporter=verbose",
+        "--reporter=json",
+        "--outputFile=/tmp/vespiary-postgres-close-baseline-ctx_a62e92df16c5/proof-r3/vitest-report.json"
+      ],
+      "command_exit": 1,
+      "files": 29084,
+      "changed": [
+        "node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/results.json"
+      ],
+      "stable": false
+    },
+    "onlyChangedPath": [
+      "node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/results.json"
+    ],
+    "directAliasesStable": 24,
+    "actualLock": {
+      "device": 54,
+      "inode": 4045,
+      "acquiredUnlockedClosed": true
+    },
+    "acceptance": false,
+    "limit": "Inner SqlError Unexpected ParameterDescription from custom fixture; first control35events and0receipts,3controls unrun. Protected prior results cache changed; controls input acceptance invalidated. No actual PostgreSQL or adoption qualification."
+  },
+  {
+    "status": "closed-source-preparation-sudo-byte-read-denied-no-package-work",
+    "recordedAt": "2026-10-20T06:17:53.928631+00:00",
+    "source": "36c95bf5dbddd020275f4dfbacc338a052eb668a",
+    "unit": "goal330-postgres-close-ctx-a62e92df16c5-setup-postgres-r4.service",
+    "InvocationID": "a335a6a5c1c34de88a53fd7c3d94c5d5",
+    "currentNative": {
+      "LoadState": "not-found",
+      "ActiveState": "inactive",
+      "SubState": "dead",
+      "Job": "",
+      "MainPID": "0",
+      "ControlGroup": ""
+    },
+    "ownedCgroupAbsent": true,
+    "knownPIDsAbsent": [
+      863839,
+      863840,
+      863866
+    ],
+    "pidLimit": "Short unit exited before live start observation; no full descendant identity census. Root current absence and exact native cgroup closure only.",
+    "packagePostflight": [
+      {
+        "argv": [
+          "/usr/bin/rpm",
+          "-q",
+          "postgresql",
+          "postgresql-server",
+          "postgresql-private-libs"
+        ],
+        "status": 3,
+        "stdout": "package postgresql is not installed\npackage postgresql-server is not installed\npackage postgresql-private-libs is not installed\n",
+        "stderr": ""
+      },
+      {
+        "argv": [
+          "/usr/bin/rpmdb",
+          "--verifydb"
+        ],
+        "status": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      {
+        "argv": [
+          "/usr/bin/systemctl",
+          "show",
+          "postgresql.service",
+          "--property=LoadState,ActiveState,SubState,MainPID,Job"
+        ],
+        "status": 0,
+        "stdout": "LoadState=not-found\nActiveState=inactive\nSubState=dead\nJob=\nMainPID=0\n",
+        "stderr": ""
+      }
+    ],
+    "packageLimit": "No before/after package-work snapshots or source guard exist; source census failed first. Current selected packages absent, rpmdb verified, service absent. Not a global package delta proof.",
+    "actualLock": {
+      "device": 54,
+      "inode": 4045,
+      "acquiredUnlockedClosed": true
+    },
+    "originalWorkerClosureSHA256": "248793391367880d357d2934b4ed0439e6d1ca0a4a68fde137c67d522b8c1150",
+    "acceptance": false,
+    "limit": "No query/preview/download/package-work/sudo/install/DB action ran inside this attempt. Denied executable bytes not reread, bypassed or relabeled. Fresh source-only native identity plan and new first-use attempt required."
+  },
+  {
+    "status": "closed-failed-one-fixture-api-error",
+    "recordedAt": "2026-10-20T05:09:34.766204+00:00",
+    "inspector": "root coordinator uid1000",
+    "native": {
+      "LoadState": "not-found",
+      "ActiveState": "inactive",
+      "SubState": "dead",
+      "Job": "",
+      "MainPID": "0",
+      "ControlGroup": ""
+    },
+    "boundCgroupAbsent": "/user.slice/user-1000.slice/user@1000.service/app.slice/goal330-self-test-native-proof-ctx-24ca935555b1.service",
+    "allObservedPidsAbsent": [
+      796659,
+      796662,
+      796665,
+      796678,
+      796702,
+      796744,
+      796751,
+      796752,
+      796772,
+      796781,
+      796800
+    ],
+    "archivedSourcesPerPhase": 2583,
+    "verifiedPhases": [
+      "before-setup",
+      "after-setup",
+      "after-proof"
+    ],
+    "actualLock": {
+      "device": 54,
+      "inode": 4045,
+      "acquiredUnlockedClosed": true
+    },
+    "result": "Own npmci0; exact five-test proof1, four callback/interruption passes and one Data.struct missing-API failure before compound-case invocation. No full-Cause acceptance or shape rejection."
+  },
+  {
+    "status": "closed-five-test-prototype-proof-passed",
+    "recordedAt": "2026-10-20T05:16:10.783621+00:00",
+    "inspector": "root coordinator uid1000",
+    "source": "38224cf34fbd5a8640b27e5c2e45f576bb7e4b33",
+    "proofSHA256": "fd4839fdfed703e0d415f91e17d14a92f6b8b7e30eae372177b4333f2eca9916",
+    "unit": "goal330-self-test-native-proof-r2-ctx-24ca935555b1.service",
+    "native": {
+      "LoadState": "not-found",
+      "ActiveState": "inactive",
+      "SubState": "dead",
+      "Job": "",
+      "MainPID": "0",
+      "ControlGroup": ""
+    },
+    "boundCgroupAbsent": "/user.slice/user-1000.slice/user@1000.service/app.slice/goal330-self-test-native-proof-r2-ctx-24ca935555b1.service",
+    "pidsAbsent": [
+      804136,
+      804139,
+      804142,
+      804155,
+      804181,
+      804188,
+      804189,
+      804209,
+      804218,
+      804237
+    ],
+    "archivedStableInputMembers": 2583,
+    "actualLock": {
+      "device": 54,
+      "inode": 4045,
+      "acquiredUnlockedClosed": true
+    },
+    "testsPassed": 5,
+    "limit": "Native local bracket prototype passed. Actual selfTestEffect owner/callers/public CLI, full types/adoption and independent final review still unimplemented/unproved."
+  },
+  {
+    "status": "closed-failed-full-types-before-actual-owner-tests",
+    "recordedAt": "2026-10-20T06:13:18.296619+00:00",
+    "source": "c6b6356290435160c4c96caa546fc313dd1ebaae",
+    "phases": [
+      {
+        "phase": "guard-stable",
+        "childStatus": 0,
+        "guardStatus": 0,
+        "membersPerPhase": 2587,
+        "changed": []
+      },
+      {
+        "phase": "guard-refusal",
+        "childStatus": 0,
+        "guardStatus": 97,
+        "membersPerPhase": 2587,
+        "changed": [
+          "home/zack/.codex/orchestrate/vespiary-goal330/reviews/self-test-owner-validation-ctx_24ca935555b1/source-guard-owned-fixture.txt"
+        ]
+      },
+      {
+        "phase": "guard-restored",
+        "childStatus": 0,
+        "guardStatus": 0,
+        "membersPerPhase": 2587,
+        "changed": []
+      },
+      {
+        "phase": "build",
+        "childStatus": 0,
+        "guardStatus": 0,
+        "membersPerPhase": 2587,
+        "changed": []
+      },
+      {
+        "phase": "types",
+        "childStatus": 2,
+        "guardStatus": 2,
+        "membersPerPhase": 2683,
+        "changed": []
+      }
+    ],
+    "typeDiagnosticCount": 128,
+    "ownedDiagnostics": [
+      "scripts/cutover/__tests__/self-test-native-owner.test.ts(87,82): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'PathLike'.",
+      "scripts/cutover/__tests__/self-test-native-owner.test.ts(160,78): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'PathLike'.",
+      "scripts/cutover/__tests__/self-test-native-owner.test.ts(395,104): error TS2304: Cannot find name 'select'."
+    ],
+    "otherDiagnostics": "Missing local workspace package declarations and consequent types; no unrelated source fix inferred.",
+    "unit": "goal330-self-test-owner-validation-ctx-24ca935555b1.service",
+    "InvocationID": "be8ac9b3498f4f2eaa1710c137e9c37b",
+    "currentNative": {
+      "LoadState": "not-found",
+      "ActiveState": "inactive",
+      "SubState": "dead",
+      "Job": "",
+      "MainPID": "0",
+      "ControlGroup": ""
+    },
+    "cgroupAbsent": true,
+    "knownPIDStartObservations": 8,
+    "processGroupsAbsent": [
+      860308,
+      860314,
+      860377,
+      860433
+    ],
+    "actualLock": {
+      "device": 54,
+      "inode": 4045,
+      "acquiredUnlockedClosed": true
+    },
+    "acceptance": false,
+    "limit": "0/97/0 guard and shared-contracts build passed. Full types failed. No compound/actual owner/variants/catalogue/public/status75/cohort/adoption ran. Preserve all source/raw evidence; fresh source fix/prerequisite plan and separate grant required."
+  },
+  {
+    "status": "closed-failed-info-unit-after-daemon-native-expiry-and-owned-slice-stop",
+    "recordedAt": "2026-10-20T05:58:08.611990+00:00",
+    "inspector": "root coordinator uid1000",
+    "source": "ba85de0b26729d288d0f44c50d133bd30724b003",
+    "fixedIntent": "/home/zack/.codex/orchestrate/vespiary-goal330/reviews/daemon-only-pending-b7a6306f20fabfaab02a29eaecf04531.json",
+    "fixedIntentSHA256": "ebcaf7b08da831f690a8666a7b0dce3c9263d967fd55a7ecce6940c3cadb63c8",
+    "boot": "a0b03e42-3394-4bbd-acee-70a20c745b4b",
+    "stableInputPaths": 13695,
+    "verifiedUniqueBlobs": 13019,
+    "preflight": 0,
+    "bootstrap": 1,
+    "failure": "StartTransientUnit InvalidArgs for StandardOutput=file:.../info.json; no Info observation",
+    "currentNative": [
+      {
+        "name": "vesverifyb7a6306f20fabfaab02a29eaecf04531.slice",
+        "properties": {
+          "LoadState": "loaded",
+          "ActiveState": "inactive",
+          "SubState": "dead",
+          "Job": "",
+          "InvocationID": "91aa0bc7db214bce9cfcb1dfd068d153",
+          "ControlGroup": ""
+        }
+      },
+      {
+        "name": "vesverifyb7a6306f20fabfaab02a29eaecf04531-daemon.service",
+        "properties": {
+          "LoadState": "loaded",
+          "ActiveState": "failed",
+          "SubState": "failed",
+          "Job": "",
+          "InvocationID": "0475832c78c94166a89caabe14f5b1ab",
+          "MainPID": "0",
+          "Result": "timeout",
+          "ControlGroup": ""
+        }
+      },
+      {
+        "name": "vesverifyb7a6306f20fabfaab02a29eaecf04531-info.service",
+        "properties": {
+          "LoadState": "not-found",
+          "ActiveState": "inactive",
+          "SubState": "dead",
+          "Job": "",
+          "InvocationID": "",
+          "MainPID": "0",
+          "Result": "success",
+          "ControlGroup": ""
+        }
+      }
+    ],
+    "ownedCgroupsAbsent": [
+      "/user.slice/user-1000.slice/user@1000.service/vesverifyb7a6306f20fabfaab02a29eaecf04531.slice",
+      "/user.slice/user-1000.slice/user@1000.service/vesverifyb7a6306f20fabfaab02a29eaecf04531.slice/vesverifyb7a6306f20fabfaab02a29eaecf04531-daemon.service"
+    ],
+    "knownPidsAbsent": [
+      839775,
+      839776
+    ],
+    "pidLimit": "Keeper start2670430 recorded; daemon main start not sampled; no complete live descendant/ns identity census before Info failure. Exact cgroup closure relies on reviewed native inheritance contract.",
+    "privateSocketsAbsent": [
+      "/run/user/1000/vesverifyb7a6306f20fabfaab02a29eaecf04531/docker.sock",
+      "/run/user/1000/vesverifyb7a6306f20fabfaab02a29eaecf04531/exec/containerd/containerd.sock",
+      "/run/user/1000/vesverifyb7a6306f20fabfaab02a29eaecf04531/exec/containerd/containerd-debug.sock",
+      "/run/user/1000/vesverifyb7a6306f20fabfaab02a29eaecf04531/rootlesskit/api.sock"
+    ],
+    "observerMountsContainPrivatePaths": false,
+    "nativeDaemonResult": "timeout after original180s RuntimeMax, no manual daemon stop",
+    "ownedSliceSuccessfulStopJob": "/org/freedesktop/systemd1/job/5095",
+    "actualLock": {
+      "device": 54,
+      "inode": 4045,
+      "acquiredUnlockedClosed": true
+    },
+    "retainedPrivatePaths": [
+      "/home/zack/.local/share/vesverifyb7a6306f20fabfaab02a29eaecf04531",
+      "/run/user/1000/vesverifyb7a6306f20fabfaab02a29eaecf04531"
+    ],
+    "outsideNamespaceHolders": "unmeasured under explicit no-external-acquisition assumption",
+    "acceptance": false,
+    "limit": "Failed first attempt is recovered for further scheduling only. No private Info, detached-nsfs, normal daemon teardown, keeper-loss qualification, Go or Goal acceptance. Existing nonce and fixed intent are consumed and must never be rerun."
+  }
+]
