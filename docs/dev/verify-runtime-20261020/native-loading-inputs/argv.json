@@ -1,0 +1,1 @@
+["/usr/bin/env","-i","PATH=/usr/bin:/bin","HOME=/home/zack","LC_ALL=C","LANG=C","TZ=UTC","/usr/bin/timeout","--signal=TERM","--kill-after=2s","135s","/usr/bin/python3","-I","-S","-B","/home/zack/orca/workspaces/substrate-goal330-20261020/goal330-daemon-only-bootstrap/docs/dev/verify-runtime-20261020/native-loading-inputs/prepare.py","prepare-native-loading-inputs"]
