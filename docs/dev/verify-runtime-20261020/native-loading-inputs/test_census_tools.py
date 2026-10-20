@@ -458,7 +458,7 @@ Dynamic section at offset 0x100 contains 3 entries:
                 case()
 
     def test_interpreter_source_raw_and_path_drift_refuse_completion(self):
-        for change in ('observer', 'owner', 'raw', 'executable', 'wrong-executable', 'prefix'):
+        for change in ('observer', 'owner', 'raw', 'executable'):
             with self.subTest(change=change), ExitStack() as stack:
                 self.output = self.outputs / change
                 emitter = self.inputs / 'observer.py'
@@ -482,17 +482,37 @@ Dynamic section at offset 0x100 contains 3 entries:
                             target.write_bytes(target.read_bytes() + b'\n')
                         elif change == 'raw':
                             (self.output / run['streams']['stdout']['name']).write_bytes(b'changed\n')
-                        elif change == 'wrong-executable':
-                            bodies['stdout'] = bodies['stdout'].replace(str(executable).encode(), b'/wrong')
-                        else:
-                            bodies['stdout'] = bodies['stdout'].replace(
-                                b'"prefix":' + json.dumps(str(self.inputs)).encode(), b'"prefix":"/absent-prefix"')
                     return bodies
 
                 stack.enter_context(patch.object(owner, '_interpreter_raw', side_effect=mutate))
                 with self.assertRaises(census_tools.Incomplete):
                     self.observation(owner, executable, support)
                 self.assert_child_closed(owner)
+                self.assertFalse((self.output / 'interpreter.complete.json').exists())
+
+    def test_interpreter_reported_paths_refuse_completion(self):
+        for field, refusal in (
+                ('executable', 'reported interpreter differs from launch'),
+                ('prefix', 'interpreter prefix is not a directory')):
+            with self.subTest(field=field):
+                self.output = self.outputs / field
+                owner, executable, support, literal = self.interpreter_fixture()
+                facts = json.loads(literal)
+                facts[field] = str(self.inputs / ('absent-' + field))
+                literal = (json.dumps(facts, sort_keys=True, separators=(',', ':')) + '\n').encode('ascii')
+                body = 'import os; os.write(1, ' + repr(literal) + ')'
+                executable.write_text('#!/bin/sh\nexec /usr/bin/python3 -I -S -B -c ' + shlex.quote(body) + ' "$@"\n')
+                contract = json.loads(support.read_bytes())
+                contract['sha256'] = hashlib.sha256(executable.read_bytes()).hexdigest()
+                support.write_text(json.dumps(contract, sort_keys=True, separators=(',', ':')) + '\n')
+                with self.assertRaises(census_tools.Incomplete) as raised:
+                    self.observation(owner, executable, support)
+                self.assertEqual(str(raised.exception), refusal)
+                self.assert_child_closed(owner)
+                self.assertTrue(owner.runs[0]['complete'])
+                self.assertEqual((self.output / 'tools/0001.stdout.raw').read_bytes(), literal)
+                self.assertEqual(owner.runs[0]['streams']['stdout']['sha256'],
+                                 hashlib.sha256(literal).hexdigest())
                 self.assertFalse((self.output / 'interpreter.complete.json').exists())
 
     def test_interpreter_launch_source_and_environment_bounds_are_prespawn(self):

@@ -152,7 +152,7 @@ operation require separate proof. No whole-goal completion follows.
 The fresh exclusive fixture directory is
 /home/zack/.codex/orchestrate/vespiary-goal330/reviews/native-interpreter-implementation/fixture-interpreter-01.
 An existing directory refuses. No previous receipt or fixture path is reused.
-The suite proposes 54 methods. All 41 predecessor methods and their assertions remain.
+The suite proposes 55 methods. All 41 predecessor methods and their assertions remain.
 The manifest boundary case covers LF, CR, CRLF, VT, FF, FS, GS, RS, NEL, LS and PS,
 alongside a positive path containing spaces, a tab and Unicode. Those separator
 filenames remain valid captured profile inputs when they are not manifest rows.
@@ -167,7 +167,7 @@ It does not capture host inputs. No fixture has run at these bytes.
 Only after fresh independent source review and root's finite grant, propose once:
 
 ```sh
-/usr/bin/env -i PATH=/usr/bin:/bin HOME=/home/zack LC_ALL=C LANG=C TZ=UTC /usr/bin/timeout --signal=TERM --kill-after=2s 360s /usr/bin/python3 -I -S -B /home/zack/orca/workspaces/substrate-goal330-20261020/goal330-interpreter-observation/docs/dev/verify-runtime-20261020/native-loading-inputs/test_census_tools.py
+/usr/bin/env -i PATH=/usr/bin:/bin HOME=/home/zack LC_ALL=C LANG=C TZ=UTC /usr/bin/timeout --signal=TERM --kill-after=2s 360s /usr/bin/python3 -I -S -B /home/zack/orca/workspaces/substrate-goal330-20261020/goal330-interpreter-comment-fix/docs/dev/verify-runtime-20261020/native-loading-inputs/test_census_tools.py
 ```
 
 Parent limits remain CPU 120/122 seconds, address space 1 GiB, 128 descriptors
