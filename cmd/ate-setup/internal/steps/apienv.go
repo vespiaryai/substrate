@@ -23,6 +23,7 @@ import (
 	"os"
 	"slices"
 
+	"github.com/agent-substrate/substrate/cmd/ate-setup/internal/config"
 	"github.com/agent-substrate/substrate/cmd/ate-setup/internal/log"
 )
 
@@ -41,6 +42,9 @@ const envHashAnnotation = "ate.dev/env-hash"
 // the result. It lists the secretRef last, so the Secret wins over a DSN a
 // previous installer left in the ConfigMap.
 func (e *Env) CreateAPIServerEnvVars(ctx context.Context) error {
+	if err := e.Cfg.ValidateK3s(config.ValidationStrict); err != nil {
+		return err
+	}
 	log.Step("create_api_server_env_vars")
 	if err := e.Kube.EnsureNamespace(ctx, e.Namespace()); err != nil {
 		return err

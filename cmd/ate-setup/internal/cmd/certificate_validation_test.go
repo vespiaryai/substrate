@@ -100,8 +100,9 @@ func isolateCertificateRoot(t *testing.T) {
 }
 
 type certificateAPI struct {
-	mu       sync.Mutex
-	requests []string
+	mu        sync.Mutex
+	requests  []string
+	responses map[string]string
 }
 
 func (api *certificateAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -111,6 +112,10 @@ func (api *certificateAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method != http.MethodGet {
 		http.Error(w, `{"kind":"Status","apiVersion":"v1","reason":"Forbidden","code":403}`, http.StatusForbidden)
+		return
+	}
+	if body, ok := api.responses[r.URL.Path]; ok {
+		_, _ = io.WriteString(w, body)
 		return
 	}
 	switch r.URL.Path {

@@ -20,7 +20,7 @@ func TestK3sProfileRejectsUnsafeConfigurations(t *testing.T) {
 	valid := func() *Config {
 		return &Config{Kubeconfig: "/explicit/config", Context: "local", Router: RouterEnvoy, ClusterSize: ClusterSizeSize0, BucketName: "snapshots", K3s: &K3sProfile{Node: "node-a", NodeUID: "node-uid", SystemUID: "system-uid", KubeletRoot: "/var/lib/kubelet", S3Endpoint: "https://s3.example.test", S3Region: "test", S3Secret: "credentials"}}
 	}
-	if err := valid().ValidateK3s(); err != nil {
+	if err := valid().ValidateK3s(ValidationStrict); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
@@ -40,7 +40,7 @@ func TestK3sProfileRejectsUnsafeConfigurations(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := valid()
 			tc.change(c)
-			if err := c.ValidateK3s(); err == nil {
+			if err := c.ValidateK3s(ValidationStrict); err == nil {
 				t.Fatal("unsafe configuration accepted")
 			}
 		})
@@ -70,7 +70,7 @@ func TestK3sSettingsBuildConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
-	cfg, err := buildConfig(t.TempDir(), env, r)
+	cfg, err := buildConfig(t.TempDir(), env, r, ValidationStrict)
 	if err != nil {
 		t.Fatalf("buildConfig() error = %v", err)
 	}

@@ -88,36 +88,6 @@ is present (skipped for --kind, and by NO_DEV_ENV=1).`,
 	// Execute prints the error itself. Without this cobra prints it too, and
 	// the two copies sandwich anything written in between.
 	SilenceErrors: true,
-	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// Commands that touch neither config nor cluster (help, version,
-		// completion) opt out by way of not being run through this path.
-		// cmd.Flags() rather than the root's persistent set: cobra parses a
-		// subcommand's own flags before this hook runs, and command-scoped
-		// settings live there. The complete set is local plus inherited.
-		cfg, err := config.LoadFlags(cmd.Flags(), config.LoadOptions{
-			ConfigPath: configPath,
-			NoDevEnv:   noDevEnv,
-		})
-		if err != nil {
-			return err
-		}
-		resolved = cfg.Resolved()
-
-		// Reported before the cluster is touched, so the settings are on
-		// screen even when connecting fails.
-		resolved.Report(log.Writer(), config.ReportOptions{OmitDefaults: noReportDefaults})
-
-		// Populate the kubeconfig before any client is built, for the
-		// GKE-from-.ate-dev-env.sh flow.
-		if err := cfg.EnsureClusterCredentials(cmd.Context()); err != nil {
-			return err
-		}
-		env, err = steps.NewEnv(cfg)
-		if err != nil {
-			return err
-		}
-		return env.PreflightK3s(cmd.Context(), false)
-	},
 	// The bare command has no Run: cobra prints the help text and exits, and
 	// because the command is not runnable, PersistentPreRunE never fires. No
 	// setup is implied by an argument-less invocation; the user picks one.
@@ -128,6 +98,28 @@ is present (skipped for --kind, and by NO_DEV_ENV=1).`,
 		recordRun(cmd, nil)
 		return nil
 	},
+}
+
+func validationPurpose(cmd *cobra.Command) config.ValidationPurpose {
+	if cmd == nil || !cmd.Runnable() {
+		return config.ValidationStrict
+	}
+	var names []string
+	for current := cmd; current != rootCmd; current = current.Parent() {
+		if current == nil {
+			return config.ValidationStrict
+		}
+		names = append(names, current.Name())
+	}
+	if len(names) != 2 {
+		return config.ValidationStrict
+	}
+	switch names[1] + " " + names[0] {
+	case "create podcertificate-controller-cas", "deploy podcertificate-controller":
+		return config.ValidationCertificateBootstrap
+	default:
+		return config.ValidationStrict
+	}
 }
 
 // recordRun writes what this run used, so the next one can reproduce it by
@@ -209,6 +201,38 @@ func Execute() {
 }
 
 func init() {
+	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		// Commands that touch neither config nor cluster (help, version,
+		// completion) opt out by way of not being run through this path.
+		// cmd.Flags() rather than the root's persistent set: cobra parses a
+		// subcommand's own flags before this hook runs, and command-scoped
+		// settings live there. The complete set is local plus inherited.
+		purpose := validationPurpose(cmd)
+		cfg, err := config.LoadFlags(cmd.Flags(), config.LoadOptions{
+			ConfigPath: configPath,
+			NoDevEnv:   noDevEnv,
+		}, purpose)
+		if err != nil {
+			return err
+		}
+		resolved = cfg.Resolved()
+
+		// Reported before the cluster is touched, so the settings are on
+		// screen even when connecting fails.
+		resolved.Report(log.Writer(), config.ReportOptions{OmitDefaults: noReportDefaults})
+
+		// Populate the kubeconfig before any client is built, for the
+		// GKE-from-.ate-dev-env.sh flow.
+		if err := cfg.EnsureClusterCredentials(cmd.Context()); err != nil {
+			return err
+		}
+		env, err = steps.NewEnv(cfg)
+		if err != nil {
+			return err
+		}
+		return env.PreflightK3s(cmd.Context(), false, purpose)
+	}
+
 	f := rootCmd.PersistentFlags()
 	// One flag per config.Registry entry, so a setting cannot reach the
 	// environment and the file but miss the command line.

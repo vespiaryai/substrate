@@ -49,7 +49,7 @@ type LoadOptions struct {
 // configuration file, then flags. The file outranks the environment because it
 // is the artifact an operator owns and reviews; ambient state must not silently
 // outrank it.
-func LoadFlags(fs *pflag.FlagSet, o LoadOptions) (*Config, error) {
+func LoadFlags(fs *pflag.FlagSet, o LoadOptions, purpose ValidationPurpose) (*Config, error) {
 	root, err := RepoRoot()
 	if err != nil {
 		return nil, err
@@ -76,7 +76,7 @@ func LoadFlags(fs *pflag.FlagSet, o LoadOptions) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	return buildConfig(root, env, res)
+	return buildConfig(root, env, res, purpose)
 }
 
 // configPathFrom picks the configuration document, flag over environment.
@@ -167,7 +167,7 @@ func mergeDevEnv(root string, env map[string]string, noDevEnv, kind bool) error 
 }
 
 // buildConfig projects the resolved settings onto Config.
-func buildConfig(root string, env map[string]string, r *Resolved) (*Config, error) {
+func buildConfig(root string, env map[string]string, r *Resolved, purpose ValidationPurpose) (*Config, error) {
 	// Before the projection, so Config, the report and the record all describe
 	// one install rather than Config describing a different one.
 	if r.Bool(kindEnabledKey) {
@@ -268,7 +268,7 @@ func buildConfig(root string, env map[string]string, r *Resolved) (*Config, erro
 			SnapshotController:    r.String("k3s.snapshotController"),
 			SnapshotControllerUID: r.String("k3s.snapshotControllerUID"),
 		}
-		if err := cfg.ValidateK3s(); err != nil {
+		if err := cfg.ValidateK3s(purpose); err != nil {
 			return nil, err
 		}
 	}

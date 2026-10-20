@@ -1,7 +1,7 @@
 # Proposed source repair
 
 Proposed title is `fix(ate-setup): scope native certificate S3 validation`.
-This proposal describes the selected design. Production implementation and validation remain pending.
+The selected source repair and focused tests are complete. Mandatory full verification and independent review remain pending.
 Root owns publication to the external fork and separate recovery of its exact source in Vespiary.
 
 ## Why
@@ -29,6 +29,7 @@ Zero and unknown purposes and all future or lookalike command paths remain stric
 
 ## Verification
 
-- Baseline-compatible real-root regression is prepared but has not compiled or run. Required red is the exact existing S3 refusal with zero requests, plus a passing valid-S3 fixture control.
-- Focused config, cmd, steps, and demos tests and mandatory recovered `make verify` remain pending under the bounded heavy slot and unchanged reviewed byte guard.
+- Unchanged production reproduced the exact S3 refusal with zero requests for both certificate operations and the alias. Strict and valid-S3 native controls passed. The original byte-stable red is preserved in [baseline receipts](baseline-receipts.tar.gz).
+- Focused config, cmd, steps, and recursive demos tests passed after one narrow fix round, with stable source and oracle bytes. Both attempts are preserved in [focused receipts](focused-receipts.tar.gz).
+- Mandatory recovered `make verify` remains pending on the separately reviewed Docker budget and prerequisite plan. Focused tests do not replace it.
 - No runtime qualification, installation, deployment, profile equivalence, or Goal 330 completion follows from source acceptance.

@@ -101,6 +101,9 @@ func (d *Substrate) atespaces() []string {
 }
 
 func (d *Substrate) Deploy(ctx context.Context, e *steps.Env) error {
+	if err := e.Cfg.ValidateK3s(config.ValidationStrict); err != nil {
+		return err
+	}
 	log.Step(d.DemoName + "_deploy")
 	if err := e.EnsureCRDs(ctx); err != nil {
 		return err

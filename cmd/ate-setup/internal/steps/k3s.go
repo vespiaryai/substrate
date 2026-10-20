@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agent-substrate/substrate/cmd/ate-setup/internal/config"
 	"github.com/agent-substrate/substrate/cmd/ate-setup/internal/kube"
 	"github.com/agent-substrate/substrate/cmd/ate-setup/internal/kustomize"
 	corev1 "k8s.io/api/core/v1"
@@ -33,11 +34,14 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-func (e *Env) PreflightK3s(ctx context.Context, csi bool) error {
+func (e *Env) PreflightK3s(ctx context.Context, csi bool, purpose config.ValidationPurpose) error {
 	if e.Cfg.K3s == nil {
 		return nil
 	}
-	if err := e.Cfg.ValidateK3s(); err != nil {
+	if csi {
+		purpose = config.ValidationStrict
+	}
+	if err := e.Cfg.ValidateK3s(purpose); err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)

@@ -25,7 +25,14 @@ import (
 
 type K3sProfile struct{ Node, NodeUID, SystemUID, KubeletRoot, S3Endpoint, S3Region, S3Secret, SnapshotController, SnapshotControllerUID string }
 
-func (c *Config) ValidateK3s() error {
+type ValidationPurpose uint8
+
+const (
+	ValidationStrict ValidationPurpose = iota
+	ValidationCertificateBootstrap
+)
+
+func (c *Config) ValidateK3s(purpose ValidationPurpose) error {
 	if c.K3s == nil {
 		return nil
 	}
@@ -41,6 +48,9 @@ func (c *Config) ValidateK3s() error {
 	}
 	if c.Router != RouterEnvoy || c.ClusterSize != ClusterSizeSize0 || c.CordonControlPlane || c.ProjectID != "" || c.ClusterName != "" || c.ClusterLocation != "" || c.CloudSQL.Instance != "" {
 		return fmt.Errorf("k3s supports only size0, envoy and a local single-node profile without GCP or cordon options")
+	}
+	if purpose == ValidationCertificateBootstrap {
+		return nil
 	}
 	u, err := url.Parse(p.S3Endpoint)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || p.S3Region == "" || p.S3Secret == "" || c.BucketName == "" {

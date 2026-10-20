@@ -63,7 +63,7 @@ func TestEveryConfigFieldIsFedBySomeSetting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
-	cfg, err := buildConfig(t.TempDir(), env, r)
+	cfg, err := buildConfig(t.TempDir(), env, r, ValidationStrict)
 	if err != nil {
 		t.Fatalf("buildConfig() error = %v", err)
 	}

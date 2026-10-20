@@ -117,7 +117,7 @@ func TestKindFalseFlagOverridesTheEnvironment(t *testing.T) {
 	if err := fs.Set("kind", "false"); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
-	cfg, err := LoadFlags(fs, LoadOptions{})
+	cfg, err := LoadFlags(fs, LoadOptions{}, ValidationStrict)
 	if err != nil {
 		t.Fatalf("LoadFlags() error = %v", err)
 	}

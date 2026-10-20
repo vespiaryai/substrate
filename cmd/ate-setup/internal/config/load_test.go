@@ -55,7 +55,7 @@ func TestKindKeepsExplicitValuesButNotAmbientOnes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		cfg, err := LoadFlags(fs, LoadOptions{ConfigPath: path})
+		cfg, err := LoadFlags(fs, LoadOptions{ConfigPath: path}, ValidationStrict)
 		if err != nil {
 			t.Fatalf("LoadFlags() error = %v", err)
 		}
@@ -83,7 +83,7 @@ func TestLoadFlagsFileOutranksEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := LoadFlags(fs, LoadOptions{ConfigPath: path})
+	cfg, err := LoadFlags(fs, LoadOptions{ConfigPath: path}, ValidationStrict)
 	if err != nil {
 		t.Fatalf("LoadFlags() error = %v", err)
 	}
@@ -101,7 +101,7 @@ func TestLoadFlagsErrorsNameTheSupplyingChannel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = LoadFlags(fs, LoadOptions{})
+	_, err = LoadFlags(fs, LoadOptions{}, ValidationStrict)
 	if err == nil {
 		t.Fatal("LoadFlags() = nil error, want an invalid-dataplane error")
 	}
@@ -116,7 +116,7 @@ func TestLoadFlagsRejectsBadConfigPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadFlags(fs, LoadOptions{ConfigPath: filepath.Join(t.TempDir(), "absent.yaml")}); err == nil {
+	if _, err := LoadFlags(fs, LoadOptions{ConfigPath: filepath.Join(t.TempDir(), "absent.yaml")}, ValidationStrict); err == nil {
 		t.Fatal("LoadFlags() = nil error, want a missing-file error")
 	}
 }
@@ -139,7 +139,7 @@ func TestConfigPathFromEnvironment(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		cfg, err := LoadFlags(fs, LoadOptions{})
+		cfg, err := LoadFlags(fs, LoadOptions{}, ValidationStrict)
 		if err != nil {
 			t.Fatalf("LoadFlags() error = %v", err)
 		}
@@ -160,7 +160,7 @@ func TestConfigPathFromEnvironment(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		cfg, err := LoadFlags(fs, LoadOptions{ConfigPath: other})
+		cfg, err := LoadFlags(fs, LoadOptions{ConfigPath: other}, ValidationStrict)
 		if err != nil {
 			t.Fatalf("LoadFlags() error = %v", err)
 		}
@@ -174,7 +174,7 @@ func TestConfigPathFromEnvironment(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		cfg, err := LoadFlags(fs, LoadOptions{})
+		cfg, err := LoadFlags(fs, LoadOptions{}, ValidationStrict)
 		if err != nil {
 			t.Fatalf("LoadFlags() error = %v", err)
 		}
@@ -194,7 +194,7 @@ func TestMissingConfigErrorNamesAbsolutePath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = LoadFlags(fs, LoadOptions{})
+	_, err = LoadFlags(fs, LoadOptions{}, ValidationStrict)
 	if err == nil {
 		t.Fatal("LoadFlags() = nil error, want a missing-file error")
 	}

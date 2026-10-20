@@ -60,7 +60,7 @@ func Load(opts Options) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	return LoadFlags(fs, LoadOptions{NoDevEnv: opts.NoDevEnv})
+	return LoadFlags(fs, LoadOptions{NoDevEnv: opts.NoDevEnv}, ValidationStrict)
 }
 
 // optionsFlagSet converts the legacy Options struct into a bound flag set,

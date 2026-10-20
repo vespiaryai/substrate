@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/yaml"
 
+	"github.com/agent-substrate/substrate/cmd/ate-setup/internal/config"
 	"github.com/agent-substrate/substrate/cmd/ate-setup/internal/kube"
 	"github.com/agent-substrate/substrate/cmd/ate-setup/internal/kustomize"
 	"github.com/agent-substrate/substrate/cmd/ate-setup/internal/log"
@@ -144,7 +145,7 @@ func (e *Env) SetupCSI(ctx context.Context, driver string) error {
 		return nil
 	}
 
-	if err := e.PreflightK3s(ctx, true); err != nil {
+	if err := e.PreflightK3s(ctx, true, config.ValidationStrict); err != nil {
 		return err
 	}
 	if err := e.ensureCSIPrerequisites(ctx); err != nil {

@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/agent-substrate/substrate/cmd/ate-setup/internal/config"
 	"github.com/agent-substrate/substrate/cmd/ate-setup/internal/kube"
 	"github.com/agent-substrate/substrate/cmd/ate-setup/internal/log"
 )
@@ -78,7 +79,7 @@ func (e *Env) DeployAteSystem(ctx context.Context, opts DeployOptions) error {
 		return err
 	}
 
-	if err := e.PreflightK3s(ctx, csiDrivers[opts.SetupCSI].hostpath); err != nil {
+	if err := e.PreflightK3s(ctx, csiDrivers[opts.SetupCSI].hostpath, config.ValidationStrict); err != nil {
 		return err
 	}
 
@@ -287,6 +288,9 @@ func setPodcertWorkersPerSigner(objs []*unstructured.Unstructured, workers int) 
 
 // DeployAteAPIServer redeploys only ate-api-server.
 func (e *Env) DeployAteAPIServer(ctx context.Context) error {
+	if err := e.Cfg.ValidateK3s(config.ValidationStrict); err != nil {
+		return err
+	}
 	log.Step("deploy_ate_apiserver")
 
 	if err := e.EnsureCRDs(ctx); err != nil {
@@ -344,6 +348,9 @@ func (e *Env) DeployAteController(ctx context.Context) error {
 
 // DeployAtelet redeploys only the atelet DaemonSet.
 func (e *Env) DeployAtelet(ctx context.Context) error {
+	if err := e.Cfg.ValidateK3s(config.ValidationStrict); err != nil {
+		return err
+	}
 	log.Step("deploy_atelet")
 
 	if err := e.EnsureCRDs(ctx); err != nil {

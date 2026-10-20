@@ -46,7 +46,7 @@ No sudo or host security change is currently needed or attempted.
 If unit controls, the selected installed Go, or any prerequisite fails, preserve the exact failed gate and stop dependent work.
 Do not relax limits, auto-download another toolchain, or change source pins.
 
-## Remaining source unit
+## Source candidate
 
 Root selected candidate B with the exact judge corrections in the full store synthesis.
 The data shape is ephemeral `ValidationPurpose uint8`, strict zero, one certificate value, and strict unknown values.
@@ -57,9 +57,12 @@ Whole-system preserves its preliminary option error order and strict preflight e
 Direct CSI none keeps its no-op after driver validation.
 `EnsureCRDs` gains no storage policy.
 
-All synthesis obligations remain pending beyond this initial prepared regression.
-They include every operational leaf and alias, future and lookalike commands, unknown enum values, common config and runtime identity cases, per-field S3 failures, strict positive controls, actual precedence and record replay, direct reuse guards, and existing CSI and CA behavior.
-The later slot must run focused config, cmd, steps, and demos tests, then mandatory `make verify`.
+The implementation now carries the typed purpose through every actual loader, builder, validator, and preflight caller.
+The existing root hook is assigned in `init`, avoiding Go's initialization cycle through the resolver's exact `rootCmd` identity check.
+Config, Env, resolved settings, and serialization gain no fields.
+The focused suite covers every operational leaf and alias, future and lookalike commands, all 256 purpose values, common config and runtime identity cases, per-field S3 failures, strict positives, actual precedence and record replay, and direct reuse guards.
+Existing CSI and CA tests also passed in the focused run.
+Mandatory `make verify` remains pending in a separately granted bounded slot after the concrete prerequisites in [verify-prerequisites.md](verify-prerequisites.md).
 The recovered target runs `go test -race ./...` and all fourteen `hack/verify/*.sh` scripts through `hack/verify-all.sh`.
 Those scripts may install or execute Go tools, Python license tooling, code generators, ShellCheck, and Weaver or pinned containers.
 Every such prerequisite and execution stays inside the one heavy slot and the byte guard.
@@ -72,8 +75,8 @@ Poteto Bug fix steps are the active checklist.
 - [x] Reproduce it yourself on the matching surface via the control skill.
 - [x] Binary-search the cause.
 - [x] Plan the fix.
-- [ ] Verify on the same surface.
-- [ ] Stage the commits so the failing repro lands before the fix in git history.
+- [x] Verify on the same surface.
+- [x] Stage the commits so the failing repro lands before the fix in git history.
 - [ ] Run Opening a PR.
 
 The first step ran through the existing real-root command test pattern. Root supplied original How grounding, distinct Architect candidates, independent judgment, and synthesis.
@@ -105,7 +108,20 @@ After completion, raw state was `LoadState=not-found`, `ActiveState=inactive`, `
 Actual shared-lock reacquisition and release succeeded before the result was sent to root.
 No host tool installation or security change occurred.
 
-Throughput checkpoint is baseline red proved and source-only implementation authorized.
-The heavy reservation is released. Every further Go, formatter, test, build, or verification execution awaits another grant.
+## Focused result and release
+
+Root granted the finite focused reservation in `msg_805a0c9b31d8`.
+Round 1 failed with stable inputs. It found the Go initialization cycle and incomplete discovery responses in positive direct-entry fixtures.
+One narrow fix round moved the existing hook assignment into `init` and supplied valid discovery responses in those fixtures.
+The source contract and expected behavior stayed unchanged.
+Round 2 passed `go test -p=2 -count=1 -timeout=120s` for config, cmd, steps, and demos recursively.
+The unchanged reviewed guard reported `stable=true`, `changed=[]`, and `command_exit=0` over 13,597 files.
+The original failed attempt, both sets of actual changed source and oracle bytes, before and after manifests, exact commands, guard digest checks, and raw unit states remain in [focused-receipts.tar.gz](focused-receipts.tar.gz).
+Both units were collected, inactive, and at `MainPID=0` before any fix or release.
+Actual shared-lock reacquisition and release succeeded after the green result was sent to root.
+No Docker, image pull, dependency install, full race suite, or verification script ran in the focused grant.
+
+Throughput checkpoint is baseline red and focused green proved, with mandatory full verification still gated.
+The heavy reservation is released. Every further test, build, installation, or verification execution awaits another grant.
 Root established external component base `codex/goal330-substrate-integration-20261020` on the fork at the same exact recovered source.
 No PR, runtime profile selection, infrastructure mutation, or Goal 330 completion is claimed.
