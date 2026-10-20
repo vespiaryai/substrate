@@ -441,6 +441,11 @@ class Census:
                 run['streams'][name] = raw
                 streams[name] = ((self.output / raw['name']).open('xb'), hashlib.sha256())
             self.capture(executable, 'tool-before-exec', eligible=True)
+            used = resource.getrusage(resource.RUSAGE_SELF)
+            remaining = int(120 - used.ru_utime - used.ru_stime - self.child_cpu - 3)
+            if remaining < 1 or time.monotonic() + 8 >= self.deadline:
+                raise Incomplete('metadata spawn has insufficient CPU or cleanup reservation')
+            run['cpu_soft_hard_seconds'] = [min(4, remaining), min(5, remaining)]
             child = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                      env={**ENVIRONMENT, 'DEBUGINFOD_URLS': ''}, close_fds=True,
                                      start_new_session=True, preexec_fn=child_limits)
