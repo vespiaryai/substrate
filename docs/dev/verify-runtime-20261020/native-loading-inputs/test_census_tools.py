@@ -25,7 +25,7 @@ from unittest.mock import patch
 
 
 SOURCE = Path(__file__).with_name('census_tools.py')
-FIXTURE = Path('/home/zack/.codex/orchestrate/vespiary-goal330/reviews/native-completion-publication-fix/fixture-first22')
+FIXTURE = Path('/home/zack/.codex/orchestrate/vespiary-goal330/reviews/native-complete-corpus-projection/fixture-first')
 spec = importlib.util.spec_from_file_location('census_tools_fixture', SOURCE)
 census_tools = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(census_tools)
@@ -597,6 +597,180 @@ Dynamic section at offset 0x100 contains 3 entries:
             os.killpg(run['pgid'], 0)
         with self.assertRaises(ChildProcessError):
             os.waitpid(run['pid'], os.WNOHANG)
+
+
+    def test_package_corpus_requires_both_distributions_and_keeps_resources(self):
+        modules = []
+        distributions = {}
+        for name, distribution, version in (('dbus', 'dbus-python', '1.4.0'), ('gi', 'PyGObject', '3.56.3')):
+            package = self.inputs / name
+            package.mkdir()
+            initializer = package / '__init__.py'
+            initializer.write_bytes(b'package source, never imported')
+            (package / 'resource').write_bytes(b'resource bytes')
+            metadata = self.inputs / (name + '.METADATA')
+            metadata.write_text('Name: ' + distribution + '\nVersion: ' + version + '\n')
+            modules.append([name, str(initializer), True])
+            distributions[name] = [str(metadata), distribution, version]
+        owner = self.owner()
+        owner.package_corpus(modules, distributions, ['.so'])
+        self.assertEqual(owner.small_body(str(self.inputs / 'dbus' / 'resource')), b'resource bytes')
+        self.assertEqual(owner.small_body(str(self.inputs / 'gi' / 'resource')), b'resource bytes')
+        with self.assertRaises(census_tools.Unsupported) as raised:
+            owner.package_corpus(modules, {'dbus': distributions['dbus']}, ['.so'])
+        self.assertEqual(raised.exception.family, 'package-corpus')
+
+    def test_corpus_link_cannot_read_outside_declared_root(self):
+        tree = self.inputs / 'tree'
+        tree.mkdir()
+        outside = self.inputs / 'outside'
+        outside.write_bytes(b'outside ordinary fixture')
+        (tree / 'alias').symlink_to('../outside')
+        owner = self.owner()
+        with self.assertRaises(census_tools.Unsupported) as raised:
+            owner.corpus_tree(str(tree), 'corpus')
+        self.assertEqual(raised.exception.family, 'corpus-destination')
+        self.assertNotIn(str(outside), owner.paths)
+        self.assertEqual(owner.payload_bytes, 0)
+
+    def test_corpus_keeps_resources_bytecode_and_package_boundary_membership(self):
+        stdlib = self.inputs / 'stdlib'
+        stdlib.mkdir()
+        (stdlib / '__pycache__').mkdir()
+        (stdlib / '__pycache__' / 'a.opt-2.pyc').write_bytes(b'bytecode')
+        (stdlib / 'resource.dat').write_bytes(b'resource')
+        (stdlib / 'foreign.so').write_bytes(b'foreign corpus fixture')
+        site = stdlib / 'site-packages'
+        site.mkdir()
+        (site / 'unrelated.py').write_bytes(b'not a declared package')
+        owner = self.owner()
+        owner.interpreter_corpus([str(stdlib)], [str(site)], ['.so'])
+        self.assertEqual(owner.paths[str(stdlib)]['names'],
+                         ['__pycache__', 'foreign.so', 'resource.dat', 'site-packages'])
+        self.assertEqual(owner.small_body(str(stdlib / '__pycache__' / 'a.opt-2.pyc')), b'bytecode')
+        self.assertEqual(owner.small_body(str(stdlib / 'resource.dat')), b'resource')
+        self.assertEqual(owner.paths[str(site)]['names'], ['unrelated.py'])
+        self.assertNotIn(str(site / 'unrelated.py'), owner.paths)
+        foreign = owner.paths[str(stdlib / 'foreign.so')]
+        self.assertTrue(foreign['candidate'])
+        self.assertFalse(foreign['eligible'])
+        self.assertFalse(any(census_tools.AUTHORITIES.values()))
+
+    def test_pkgutil_namespace_portions_duplicate_lines_and_absence(self):
+        search = self.inputs / 'search'
+        search.mkdir()
+        gi = search / 'gi'
+        gi.mkdir()
+        overrides = gi / 'overrides'
+        overrides.mkdir()
+        (overrides / 'GLib.py').write_bytes(b'override')
+        extra = self.inputs / 'extra'
+        extra.mkdir()
+        (extra / 'resource').write_bytes(b'extra')
+        missing = self.inputs / 'missing'
+        (search / 'gi.pkg').write_text('# ignored\n' + str(extra) + '\n' + str(extra) + '\n' + str(missing) + '\n')
+        source = self.inputs / 'pkgutil.py'
+        source.write_bytes(b'owned policy source, never imported')
+        owner = self.owner()
+        result = owner.pkgutil_corpus(str(source), hashlib.sha256(source.read_bytes()).hexdigest(),
+                                     [str(search)], [str(gi)], [str(self.inputs)], ['.so'])
+        self.assertEqual(result['gi'], [str(gi), str(extra), str(extra), str(missing)])
+        self.assertEqual(result['gi.overrides'], [str(overrides)])
+        self.assertEqual(owner.small_body(str(extra / 'resource')), b'extra')
+        self.assertEqual(owner.small_body(str(overrides / 'GLib.py')), b'override')
+        self.assertEqual(owner.paths[str(missing)]['kind'], 'absent')
+        self.assertEqual(owner.paths[str(gi / 'gi.overrides.pkg')]['kind'], 'absent')
+        self.assertFalse(any(result['authorities'].values()))
+
+    def test_corpus_duplicate_path_does_not_duplicate_bytes_or_promote_actor(self):
+        path = self.inputs / 'module.so'
+        path.write_bytes(b'literal candidate')
+        owner = self.owner()
+        owner.corpus_tree(str(self.inputs), 'corpus', extension_suffixes=['.so'])
+        before = owner.payload_bytes
+        row = owner.capture(str(path), 'configured-candidate', candidate=True)
+        self.assertEqual(owner.payload_bytes, before)
+        self.assertEqual(row['reasons'], ['corpus', 'configured-candidate'])
+        self.assertTrue(row['candidate'])
+        self.assertFalse(row['eligible'])
+        owner.capture(str(path), 'explicit-actor', eligible=True)
+        self.assertTrue(row['eligible'])
+        self.assertEqual(owner.payload_bytes, before)
+
+    def test_missing_family_and_present_zip_are_structural_refusals(self):
+        present = self.inputs / 'present'
+        present.write_bytes(b'required bytes')
+        archive = self.inputs / 'python.zip'
+        archive.write_bytes(b'owned zip placeholder')
+        owner = self.owner()
+        owner.required_family('locale', [str(present)])
+        self.assertEqual(owner.small_body(str(present)), b'required bytes')
+        for paths in ([], [str(self.inputs / 'missing')]):
+            with self.assertRaises(census_tools.Unsupported) as raised:
+                owner.required_family('locale', paths)
+            self.assertEqual(raised.exception.family, 'locale')
+        with self.assertRaises(census_tools.Unsupported) as raised:
+            owner.interpreter_corpus([str(archive)], [], ['.so'])
+        self.assertEqual(raised.exception.family, 'zip-search')
+        self.assertEqual(owner.small_body(str(archive)), b'owned zip placeholder')
+
+    def test_consumer_serialization_exact_boundary_and_locale_charge(self):
+        self.assertEqual(census_tools.serialized_size({'x': '\u00e9'}, 15), 15)
+        with self.assertRaisesRegex(census_tools.Incomplete, 'serialization cap'):
+            census_tools.serialized_size({'x': '\u00e9'}, 14)
+        self.assertEqual(census_tools.limit_charge(233380912, 134217728),
+                         {'bytes_or_records': 233380912, 'cap': 134217728,
+                          'excess': 99163184, 'fits': False})
+        self.assertEqual(census_tools.limit_charge(8, 8),
+                         {'bytes_or_records': 8, 'cap': 8, 'excess': 0, 'fits': True})
+        self.assertEqual(census_tools.limit_charge(9, 8),
+                         {'bytes_or_records': 9, 'cap': 8, 'excess': 1, 'fits': False})
+
+    def test_serialized_profile_snapshot_report_and_repeated_reads(self):
+        a, b, profile_path, manifest_path = [str(self.inputs / name) for name in
+                                           ('a.py', 'b', 'profile', 'manifest')]
+        for path, body in ((a, b'\x00\xff'), (b, b'xyz'), (profile_path, b'old profile'), (manifest_path, b'old manifest')):
+            Path(path).write_bytes(body)
+        owner = self.owner()
+        for path in (a, b, profile_path, manifest_path):
+            owner.capture(path, 'projection-fixture')
+        profile = {'application_enabled': False, 'import_inputs_reviewed': False,
+                   'offline_reviewed': False, 'operations': {'holder': False, 'finite': False, 'recheck': False},
+                   'stdlib_search': ['/declared/search'], 'modules': [],
+                   'files': {a: hashlib.sha256(b'\x00\xff').hexdigest()},
+                   'membership': {}, 'required_absences': []}
+        projection = owner.serialized_projection(profile, [a, b], profile_path, manifest_path,
+                                                 [a], {}, {'accepted': False}, 7)
+        manifest_body = (hashlib.sha256(b'\x00\xff').hexdigest() + '  ' + a + '\n' +
+                         hashlib.sha256(b'xyz').hexdigest() + '  ' + b + '\n').encode()
+        profile_body = json.dumps(profile, sort_keys=True).encode()
+        expected_report = {'kind': 'import-only', 'application_enabled': False, 'search': ['/declared/search'],
+                           'modules': {}, 'source_buffers': {a: {'size': 2,
+                               'sha256': hashlib.sha256(b'\x00\xff').hexdigest(), 'raw': '00ff'}},
+                           'checked_documents': {path: {'size': len(body),
+                               'sha256': hashlib.sha256(body).hexdigest(), 'raw': body.hex()}
+                               for path, body in ((profile_path, profile_body), (manifest_path, manifest_body))}}
+        report_size = len(json.dumps(expected_report, sort_keys=True).encode())
+        self.assertEqual(projection['entry']['loop_bytes'], 7)
+        self.assertEqual(projection['entry']['total_read_bytes'], 7 + len(profile_body) + len(manifest_body))
+        self.assertEqual(projection['offline']['union_bytes'], 5 + len(profile_body) + len(manifest_body))
+        self.assertEqual(projection['import_report']['source_buffer_hex_bytes'], 4)
+        self.assertEqual(projection['import_report']['full_serialized_bytes'], report_size)
+        self.assertEqual(projection['producer_output_bytes'],
+                         report_size + 1 + len(json.dumps({'accepted': False}, sort_keys=True).encode()) + 1 + 7)
+        self.assertEqual(projection['snapshot_map_serialized_bytes'],
+                         len(json.dumps(projection['snapshot'], sort_keys=True).encode()))
+        self.assertEqual(projection['snapshot']['files'][a]['size'], 2)
+        self.assertEqual(projection['manifest_hex'], manifest_body.hex())
+        self.assertFalse(any(projection['authorities'].values()))
+        proposed = owner.proposed_profile(profile, profile_path, manifest_path)
+        self.assertEqual(set(proposed['files']), {a, b})
+        self.assertNotIn(profile_path, proposed['files'])
+        self.assertNotIn(manifest_path, proposed['files'])
+        self.assertEqual(proposed['status'], 'source-unproved')
+        with self.assertRaisesRegex(census_tools.Incomplete, 'self-referential'):
+            owner.serialized_projection(profile, [profile_path], profile_path, manifest_path,
+                                        [a], {}, {}, 0)
 
 
 if __name__ == '__main__':
