@@ -50,6 +50,31 @@ class Incomplete(RuntimeError):
     pass
 
 
+class Unsupported(Incomplete):
+    def __init__(self, family, path, detail):
+        self.family = family
+        self.path = path
+        super().__init__(f'{family}: {path}: {detail}')
+
+
+def consumer_json(value):
+    return json.dumps(value, sort_keys=True, allow_nan=False).encode('utf-8')
+
+
+def serialized_size(value, limit):
+    size = 0
+    for chunk in json.JSONEncoder(sort_keys=True, allow_nan=False).iterencode(value):
+        size += len(chunk.encode('utf-8'))
+        if size > limit:
+            raise Incomplete('consumer serialization cap')
+    return size
+
+
+def limit_charge(amount, cap):
+    return {'bytes_or_records': amount, 'cap': cap, 'excess': max(0, amount - cap),
+            'fits': amount <= cap}
+
+
 def identity(value):
     return {name: getattr(value, name) for name in (
         'st_dev', 'st_ino', 'st_mode', 'st_uid', 'st_gid', 'st_size', 'st_mtime_ns', 'st_ctime_ns')}
@@ -356,8 +381,10 @@ class Census:
             raise Incomplete('directory descriptor changed')
         return descriptor
 
-    def capture(self, path, reason, eligible=False):
+    def capture(self, path, reason, eligible=False, candidate=False, allowed_roots=()):
         path = absolute(path)
+        if allowed_roots and not any(path == root or path.startswith(root + '/') for root in allowed_roots):
+            raise Unsupported('corpus-destination', path, 'outside declared ordinary roots')
         self.check()
         self.subject = path
         if path != '/' and '/' not in self.paths:
@@ -371,8 +398,9 @@ class Census:
                 self.charge(1)
                 row['reasons'].append(reason)
             row['eligible'] = row['eligible'] or eligible
-            if row['kind'] == 'symlink' and eligible:
-                self.capture(row['target_path'], 'link:' + path, eligible=True)
+            row['candidate'] = row.get('candidate', False) or candidate
+            if row['kind'] == 'symlink' and (eligible or candidate or allowed_roots):
+                self.capture(row['target_path'], 'link:' + path, eligible, candidate, allowed_roots)
             return row
         self.active.add(path)
         try:
@@ -382,7 +410,7 @@ class Census:
                 name = Path(path).name if path != '/' else '.'
                 self.subject = path
                 self.charge(1)
-                row = {'reasons': [reason], 'eligible': eligible, 'complete': False}
+                row = {'reasons': [reason], 'eligible': eligible, 'candidate': candidate, 'complete': False}
                 self.paths[path] = row
                 try:
                     before = os.stat(name, dir_fd=parent, follow_symlinks=False)
@@ -410,7 +438,7 @@ class Census:
                         row.update(kind='symlink', target=target, target_path=next_path)
                         if identity(os.stat(name, dir_fd=parent, follow_symlinks=False)) != row['before']:
                             raise Incomplete('link changed')
-                        self.capture(next_path, 'link:' + path, eligible)
+                        self.capture(next_path, 'link:' + path, eligible, candidate, allowed_roots)
                     elif stat.S_ISDIR(before.st_mode):
                         row['kind'] = 'directory'
                         descriptor = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
@@ -548,6 +576,143 @@ class Census:
         if list(sys.path) != parsed['stdlib_search']:
             raise Incomplete('isolated interpreter search differs from reviewed profile')
         self.capture(str(Path(__file__)), 'census-source')
+
+    def resolved(self, path):
+        path = absolute(path)
+        for _ in range(40):
+            row = self.paths[path]
+            if not row['complete']:
+                raise Incomplete('incomplete observation reused')
+            if row['kind'] != 'symlink':
+                return path, row
+            path = row['target_path']
+        raise Incomplete('link depth cap')
+
+    def corpus_tree(self, path, reason, excluded=(), extension_suffixes=(), ancestors=(), allowed_roots=()):
+        path = absolute(path)
+        allowed_roots = allowed_roots or (path,)
+        self.capture(path, reason, candidate=path.endswith(tuple(extension_suffixes)), allowed_roots=allowed_roots)
+        target, observed = self.resolved(path)
+        if observed['kind'] == 'absent':
+            raise Unsupported('required-corpus', path, 'missing required tree member')
+        if observed['kind'] == 'regular':
+            return
+        node = (observed['before']['st_dev'], observed['before']['st_ino'])
+        if node in ancestors or len(ancestors) >= 40:
+            raise Unsupported('corpus-cycle', path, 'recursive directory alias')
+        if path in excluded or target in excluded:
+            self.capture(path, 'separate-package-domain')
+            return
+        for name in observed['names']:
+            self.corpus_tree(str(Path(path) / name), reason, excluded, extension_suffixes,
+                             (*ancestors, node), allowed_roots)
+
+    def interpreter_corpus(self, search, package_boundaries, extension_suffixes):
+        if not search or not extension_suffixes:
+            raise Unsupported('interpreter-corpus', '', 'missing search or extension suffix declarations')
+        directories = 0
+        for path in search:
+            self.capture(path, 'interpreter-search', allowed_roots=tuple(search))
+            _target, row = self.resolved(path)
+            if row['kind'] == 'absent':
+                continue
+            if row['kind'] != 'directory':
+                raise Unsupported('zip-search', path, 'present archive requires bounded ZIP metadata support')
+            directories += 1
+            self.corpus_tree(path, 'stdlib-corpus', package_boundaries, extension_suffixes)
+        if not directories:
+            raise Unsupported('interpreter-corpus', '', 'no present interpreter corpus directory')
+
+    def package_corpus(self, modules, distributions, extension_suffixes):
+        packages = {name: path for name, path, package in modules if package}
+        if set(packages) != {'dbus', 'gi'} or set(distributions) != {'dbus', 'gi'}:
+            raise Unsupported('package-corpus', '', 'dbus and gi declarations are both required')
+        for name, initializer in packages.items():
+            self.corpus_tree(str(Path(initializer).parent), 'package-corpus:' + name,
+                             extension_suffixes=extension_suffixes)
+            metadata, distribution, version = distributions[name]
+            self.capture(metadata, 'distribution-metadata:' + name)
+            fields = self.small_body(metadata).decode('utf-8', errors='strict').splitlines()
+            if fields.count('Name: ' + distribution) != 1 or fields.count('Version: ' + version) != 1:
+                raise Unsupported('distribution-metadata', metadata, 'name or version differs')
+        for name, path, package in modules:
+            self.capture(path, 'explicit-module:' + name, candidate=not package)
+            self.regular_row(path)
+
+    def package_portions(self, name, search, initial, allowed_roots, extension_suffixes):
+        if name not in {'gi', 'gi.overrides'}:
+            raise Unsupported('pkgutil-name', name, 'unreviewed package extension')
+        allowed_roots = tuple(absolute(root) for root in allowed_roots)
+
+        def portion(path, reason):
+            path = absolute(path)
+            if not any(path == root or path.startswith(root + '/') for root in allowed_roots):
+                raise Unsupported('pkgutil-destination', path, 'outside declared ordinary roots')
+            self.capture(path, reason, allowed_roots=allowed_roots)
+            target, observed = self.resolved(path)
+            if not any(target == root or target.startswith(root + '/') for root in allowed_roots):
+                raise Unsupported('pkgutil-destination', target, 'link leaves declared ordinary roots')
+            if observed['kind'] == 'directory':
+                self.corpus_tree(path, reason, extension_suffixes=extension_suffixes, allowed_roots=allowed_roots)
+            elif observed['kind'] != 'absent':
+                raise Unsupported('pkgutil-portion', path, 'portion is not a directory')
+            return path
+
+        result = [portion(path, 'initial-portion:' + name) for path in initial]
+        final_name = name.rsplit('.', 1)[-1]
+        for root in search:
+            self.capture(root, 'pkgutil-search:' + name, allowed_roots=allowed_roots)
+            _target, observed = self.resolved(root)
+            if observed['kind'] == 'absent':
+                continue
+            if observed['kind'] != 'directory':
+                raise Unsupported('pkgutil-finder', root, 'only ordinary directory finders are supported')
+            candidate = str(Path(root) / final_name)
+            self.capture(candidate, 'namespace-candidate:' + name, allowed_roots=allowed_roots)
+            _target, found = self.resolved(candidate)
+            if found['kind'] == 'directory':
+                for suffix in ('.py', '.pyc', *extension_suffixes):
+                    shadow = str(Path(root) / (final_name + suffix))
+                    self.capture(shadow, 'pkgutil-shadow:' + name, allowed_roots=allowed_roots)
+                    if self.resolved(shadow)[1]['kind'] != 'absent':
+                        raise Unsupported('pkgutil-shadow', shadow, 'finder precedence needs source review')
+                value = portion(candidate, 'namespace-portion:' + name)
+                if value not in result:
+                    result.append(value)
+            elif found['kind'] != 'absent':
+                raise Unsupported('pkgutil-portion', candidate, 'named portion is not a directory')
+            pkgfile = str(Path(root) / (name + '.pkg'))
+            self.capture(pkgfile, 'pkgutil-data:' + name, allowed_roots=allowed_roots)
+            if self.resolved(pkgfile)[1]['kind'] == 'absent':
+                continue
+            text = self.small_body(pkgfile).decode('utf-8', errors='strict')
+            for line in text.replace('\r\n', '\n').replace('\r', '\n').split('\n'):
+                if line and not line.startswith('#'):
+                    self.charge(1)
+                    result.append(portion(line, 'pkgutil-line:' + pkgfile))
+        return result
+
+    def pkgutil_corpus(self, source, digest, search, gi_initial, allowed_roots, extension_suffixes):
+        for key in ('GI_TYPELIB_PATH', 'PYGI_OVERRIDES_PATH'):
+            if key in os.environ:
+                raise Unsupported('package-environment', key, 'required environment absence differs')
+        self.capture(source, 'pkgutil-policy-source')
+        if self.regular_row(source)['raw']['sha256'] != digest:
+            raise Unsupported('pkgutil-source', source, 'reviewed implementation digest differs')
+        gi = self.package_portions('gi', search, gi_initial, allowed_roots, extension_suffixes)
+        overrides = self.package_portions('gi.overrides', gi, (), allowed_roots, extension_suffixes)
+        return {'gi': gi, 'gi.overrides': overrides,
+                'policy_source': source, 'policy_sha256': digest,
+                'environment_absences': ['GI_TYPELIB_PATH', 'PYGI_OVERRIDES_PATH'],
+                'status': 'declared-directory-portions-only', 'authorities': AUTHORITIES}
+
+    def required_family(self, family, paths):
+        if not paths:
+            raise Unsupported(family, '', 'required family has no grounded declarations')
+        for path in paths:
+            self.capture(path, 'required-family:' + family)
+            if self.resolved(path)[1]['kind'] == 'absent':
+                raise Unsupported(family, path, 'required family member is absent')
 
     def metadata(self, operation, subjects):
         if any(not run['reaped'] or not run['group_closed'] for run in self.runs):
@@ -814,6 +979,156 @@ class Census:
                 'remaining_gates': ['complete corpus and candidate closure', 'proposed profile serialization',
                                     'actual snapshot map and source-buffer report serialization',
                                     'matching entry and offline membership/JSON and producer limits']}
+
+    def proposed_profile(self, template, profile_path, manifest_path):
+        disabled(template)
+        documents = {absolute(profile_path), absolute(manifest_path)}
+        documents.update(self.resolved(path)[0] for path in tuple(documents))
+        profile = json.loads(consumer_json(template))
+        profile['files'] = {}
+        profile['membership'] = {}
+        profile['required_absences'] = []
+        for path, row in sorted(self.paths.items()):
+            if not row['complete']:
+                raise Incomplete('proposed profile contains incomplete input')
+            if path in documents:
+                continue
+            _target, observed = self.resolved(path)
+            if observed['kind'] == 'regular':
+                profile['files'][path] = observed['raw']['sha256']
+            elif observed['kind'] == 'directory':
+                profile['membership'][path] = observed['names']
+            elif observed['kind'] == 'absent':
+                profile['required_absences'].append(path)
+        profile['status'] = 'source-unproved'
+        profile['unproved'] = list(GAPS)
+        serialized_size(profile, JSON_BYTES)
+        return profile
+
+    def serialized_projection(self, profile, source_paths, profile_path, manifest_path,
+                              loaded_sources, modules, suite_summary, suite_text_bytes):
+        disabled(profile)
+        profile_path, manifest_path = absolute(profile_path), absolute(manifest_path)
+        documents = {profile_path, manifest_path}
+        if (documents & (set(profile['files']) | set(source_paths)) or
+                len(set(source_paths)) != len(source_paths)):
+            raise Incomplete('self-referential documents or duplicate manifest rows')
+        if len(set(loaded_sources)) != len(loaded_sources):
+            raise Incomplete('duplicate loaded source declarations')
+        serialized_size(modules, JSON_BYTES)
+        profile_size = serialized_size(profile, JSON_BYTES)
+        profile_body = consumer_json(profile)
+        manifest_body = ''.join(self.regular_row(path)['raw']['sha256'] + '  ' + path + '\n'
+                                for path in source_paths).encode('utf-8')
+        if len(manifest_body) > JSON_BYTES:
+            raise Incomplete('proposed manifest serialization cap')
+        buffers = {profile_path: profile_body, manifest_path: manifest_body}
+        paths = set(profile['files']) | set(source_paths) | documents
+        sizes = {path: len(buffers[path]) if path in buffers else self.regular_row(path)['raw']['size']
+                 for path in paths}
+        for path, digest in profile['files'].items():
+            if self.regular_row(path)['raw']['sha256'] != digest:
+                raise Incomplete('projection profile digest differs from archived input')
+        snapshot = {'files': {}, 'links': {}, 'membership': {}, 'absences': {}}
+        for path in sorted(paths):
+            row = self.regular_row(path)
+            before = row['before']
+            digest = hashlib.sha256(buffers[path]).hexdigest() if path in buffers else row['raw']['sha256']
+            snapshot['files'][path] = {'sha256': digest, 'size': sizes[path],
+                'mode': before['st_mode'], 'uid': before['st_uid'], 'gid': before['st_gid'],
+                'device': before['st_dev'], 'inode': before['st_ino'], 'mtime_ns': before['st_mtime_ns']}
+        for path, names in profile['membership'].items():
+            _target, row = self.resolved(path)
+            if row['kind'] != 'directory' or row['names'] != names:
+                raise Incomplete('projection directory membership differs')
+            snapshot['membership'][path] = names
+        for path in profile['required_absences']:
+            if self.resolved(path)[1]['kind'] != 'absent':
+                raise Incomplete('projection required absence differs')
+            snapshot['absences'][path] = True
+        pending = list(paths) + list(profile['membership']) + [
+            str(Path(path).parent) for path in profile['required_absences']]
+        seen = set()
+        while pending:
+            path = pending.pop()
+            if path in seen:
+                continue
+            seen.add(path)
+            row = self.paths[path]
+            if row['kind'] == 'symlink':
+                before = row['before']
+                snapshot['links'][path] = {'target': row['target'], 'mode': before['st_mode'],
+                    'uid': before['st_uid'], 'gid': before['st_gid'], 'device': before['st_dev'],
+                    'inode': before['st_ino'], 'mtime_ns': before['st_mtime_ns']}
+                pending.append(row['target_path'])
+            if path != '/':
+                pending.append(str(Path(path).parent))
+        snapshot_size = serialized_size(snapshot, JSON_BYTES)
+        sources = {}
+        source_hex = 0
+        for path in loaded_sources:
+            if path not in paths or not path.endswith('.py'):
+                raise Incomplete('loaded source lacks declared Python buffer')
+            body = self.small_body(path)
+            source_hex += 2 * len(body)
+            sources[path] = {'size': len(body), 'sha256': hashlib.sha256(body).hexdigest(), 'raw': body.hex()}
+        checked = {path: {'size': len(body), 'sha256': hashlib.sha256(body).hexdigest(), 'raw': body.hex()}
+                   for path, body in buffers.items()}
+        report = {'kind': 'import-only', 'application_enabled': profile['application_enabled'],
+                  'search': profile['stdlib_search'], 'modules': modules,
+                  'source_buffers': sources, 'checked_documents': checked}
+        report_size = serialized_size(report, 25165824)
+        summary_size = serialized_size(suite_summary, 33554432) + 1
+        if not isinstance(suite_text_bytes, int) or isinstance(suite_text_bytes, bool) or suite_text_bytes < 0:
+            raise Incomplete('suite text requires a nonnegative declared byte count')
+        loop = sum(sizes[path] for path in profile['files']) + sum(sizes[path] for path in source_paths)
+        union = sum(sizes.values())
+        largest = max(sizes.values(), default=0)
+        membership = max(map(len, profile['membership'].values()), default=0)
+        current = {'entry_loop': limit_charge(loop, 536870912),
+                   'offline_union': limit_charge(union, 536870912),
+                   'two_snapshot_payload': limit_charge(2 * union, TOTAL_BYTES),
+                   'regular_file': limit_charge(largest, 134217728),
+                   'union_paths': limit_charge(len(paths), 4096),
+                   'membership': limit_charge(membership, 4096),
+                   'profile': limit_charge(profile_size, 1048576),
+                   'manifest': limit_charge(len(manifest_body), 1048576),
+                   'snapshot_map': limit_charge(snapshot_size, 1048576),
+                   'import_report': limit_charge(report_size, 1048576),
+                   'suite_file': limit_charge(max(snapshot_size, min(largest, 4194304)), 4194304)}
+        proposed = {'entry_loop': limit_charge(loop, TOTAL_BYTES),
+                    'offline_union': limit_charge(union, TOTAL_BYTES),
+                    'two_snapshot_payload': limit_charge(2 * union, TOTAL_BYTES),
+                    'regular_file': limit_charge(largest, FILE_BYTES),
+                    'union_paths': limit_charge(len(paths), RECORDS),
+                    'membership': limit_charge(membership, RECORDS),
+                    'profile': limit_charge(profile_size, JSON_BYTES),
+                    'manifest': limit_charge(len(manifest_body), JSON_BYTES),
+                    'snapshot_map': limit_charge(snapshot_size, JSON_BYTES),
+                    'import_report': limit_charge(report_size, 25165824),
+                    'suite_output': limit_charge(report_size + 1 + summary_size + suite_text_bytes, 33554432)}
+        return {'status': 'incomplete', 'selection': 'unobserved', 'authorities': AUTHORITIES,
+                'basis': 'exact serialization of supplied declarations and archived buffers; no runtime module observation',
+                'profile': profile, 'manifest_hex': manifest_body.hex(), 'snapshot': snapshot,
+                'current': current, 'proposed': proposed,
+                'entry': {'loop_bytes': loop, 'document_bytes': profile_size + len(manifest_body),
+                          'total_read_bytes': loop + profile_size + len(manifest_body)},
+                'offline': {'union_bytes': union, 'union_paths': len(paths),
+                            'two_snapshot_payload_bytes': 2 * union,
+                            'two_snapshot_map_bytes': 2 * snapshot_size},
+                'import_report': {'document_hex_bytes': 2 * (profile_size + len(manifest_body)),
+                                  'source_buffer_hex_bytes': source_hex, 'full_serialized_bytes': report_size,
+                                  'stdout_bytes': report_size + 1},
+                'proposed_profile_serialized_bytes': profile_size,
+                'snapshot_map_serialized_bytes': snapshot_size,
+                'producer_output_bytes': report_size + 1 + summary_size + suite_text_bytes,
+                'producers': {'import_stdout_bytes': report_size + 1,
+                              'suite_stdout_bytes': summary_size, 'suite_stderr_bytes': suite_text_bytes,
+                              'combined_output_is_proposed_aggregate': True},
+                'acquisition_payload_bytes': self.payload_bytes, 'tool_output_bytes': self.tool_bytes,
+                'remaining_gates': ['complete actor and tool bootstrap closure', 'actual module and suite text bounds',
+                                    'generated document metadata is hypothetical at archived document identities',
+                                    'matching consumer source changes and separately granted proof']}
 
     def failure(self, error):
         self.document('census.json', {'status': 'incomplete', 'paths': self.paths,
