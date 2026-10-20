@@ -632,6 +632,8 @@ class OwnedHolderTest(unittest.TestCase):
                             pending = json.loads(primary.read_bytes())
                             self.assertEqual(contention["inode"], pending["lock"])
                             finite_exit = json.loads(primary.with_suffix(".finite-exit.json").read_bytes())
+                            if case == "malformed":
+                                self.assertEqual(primary.with_suffix(".finite-buffer.json").read_bytes(), b"{")
                             if case == "timeout":
                                 self.assertTrue(finite_exit["timed_out"])
                                 self.assertLess(finite_exit["returncode"], 0)

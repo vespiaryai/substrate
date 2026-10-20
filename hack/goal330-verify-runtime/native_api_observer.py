@@ -971,8 +971,8 @@ def hold_attempt(attempt):
         append_receipt(attempt.receipt.with_suffix(".finite-child.json"), {"child": finite})
         exit_record = wait_finite(attempt, child, finite, "finite", 330)
         raw = read_bounded(attempt.receipt.with_suffix(".finite-result.json"), MAX_RESULT)
-        result = strict_json(raw, MAX_RESULT)
         write_evidence(attempt.receipt.with_suffix(".finite-buffer.json"), raw)
+        result = strict_json(raw, MAX_RESULT)
         if time.monotonic() >= ceiling:
             raise RuntimeError("outer recovery ceiling reached; retain physical custody")
         if result["status"] not in ("qualified-and-closed", "failed-but-closed"):
@@ -987,8 +987,8 @@ def hold_attempt(attempt):
         append_receipt(attempt.receipt.with_suffix(".recheck-child.json"), {"child": recheck})
         recheck_exit = wait_finite(attempt, child, recheck, "recheck", 100)
         checked_raw = read_bounded(attempt.receipt.with_suffix(".recheck-result.json"), MAX_RESULT)
-        checked = strict_json(checked_raw, MAX_RESULT)
         write_evidence(attempt.receipt.with_suffix(".recheck-buffer.json"), checked_raw)
+        checked = strict_json(checked_raw, MAX_RESULT)
         if (recheck_exit["returncode"] != 0 or checked["status"] not in ("qualified-and-closed", "failed-but-closed")
                 or checked["closure"] != result["closure"] or checked["observation"] != result["observation"]):
             raise RuntimeError("finite positive recheck failed or changed the bound observation")
