@@ -427,6 +427,10 @@ Dynamic section at offset 0x100 contains 3 entries:
         self.assertTrue(run['group_closed'])
         self.assertFalse(run['complete'])
         self.assertFalse((self.output / 'tools/0001.complete.json').exists())
+        with self.assertRaises(ProcessLookupError):
+            os.killpg(run['pgid'], 0)
+        with self.assertRaises(ChildProcessError):
+            os.waitpid(run['pid'], os.WNOHANG)
 
     def test_metadata_second_parent_signal_still_kills_and_reaps(self):
         body = ('import os, signal, time\n'
@@ -452,6 +456,10 @@ Dynamic section at offset 0x100 contains 3 entries:
         self.assertTrue(run['reaped'])
         self.assertTrue(run['group_closed'])
         self.assertFalse(run['complete'])
+        with self.assertRaises(ProcessLookupError):
+            os.killpg(run['pgid'], 0)
+        with self.assertRaises(ChildProcessError):
+            os.waitpid(run['pid'], os.WNOHANG)
 
     def test_metadata_drain_error_preserves_other_stream_prefix(self):
         body = ('import os, signal, time\n'
@@ -488,6 +496,10 @@ Dynamic section at offset 0x100 contains 3 entries:
         self.assertTrue(run['reaped'])
         self.assertTrue(run['group_closed'])
         self.assertFalse(run['complete'])
+        with self.assertRaises(ProcessLookupError):
+            os.killpg(run['pgid'], 0)
+        with self.assertRaises(ChildProcessError):
+            os.waitpid(run['pid'], os.WNOHANG)
 
     def test_metadata_facts_joins_exact_archive_and_refuses_changed_evidence(self):
         subject = self.inputs / 'cache-subject'

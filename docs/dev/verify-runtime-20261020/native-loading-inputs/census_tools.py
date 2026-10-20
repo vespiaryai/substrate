@@ -567,7 +567,8 @@ class Census:
                 if operation == 'readelf' else [executable, '--print-cache', '-C', *archived])
         run = {'argv': argv, 'subjects': list(subjects), 'tool': tool, 'complete': False,
                'scope': 'raw-metadata-only', 'grammar_validated': False, 'bootstrap_closed': False,
-               'group_closed': False, 'reaped': False, 'returncode': None, 'streams': {}}
+               'group_closed': False, 'reaped': False, 'returncode': None, 'streams': {},
+               'error': None, 'cleanup_errors': []}
         self.runs.append(run)
         number = len(self.runs)
         self.document(f'tools/{number:04d}.intent.json', run)
@@ -575,7 +576,26 @@ class Census:
         selector = selectors.DefaultSelector()
         child = None
         error = None
+        finalizing = False
+        failed_streams = set()
+        selector_failed = False
         started = time.monotonic()
+
+        def cleanup(action, operation, *args):
+            try:
+                return operation(*args)
+            except BaseException as failure:
+                run['cleanup_errors'].append(f'{action}: {type(failure).__name__}: {failure}')
+
+        def parent_signal(signum, frame):
+            nonlocal error
+            if finalizing or error is not None:
+                if error is None:
+                    error = Incomplete('parent interrupted')
+                    run['error'] = str(error)
+                run['cleanup_errors'].append('parent SIGTERM during cleanup')
+                return
+            interrupted(signum, frame)
 
         def child_limits():
             resource.setrlimit(resource.RLIMIT_CPU, (min(4, remaining), min(5, remaining)))
@@ -586,31 +606,44 @@ class Census:
         def drain(wait, cleanup=False):
             for key, _mask in selector.select(wait):
                 name = key.data
+                if name in failed_streams:
+                    continue
                 raw = run['streams'][name]
                 cap = 2097152 if name == 'stdout' else 262144
                 available = max(0, min(cap - raw['size'], 33554432 - self.tool_bytes,
                                        self.total_bytes - self.payload_bytes))
                 try:
-                    chunk = os.read(key.fileobj.fileno(), min(65536, available + 1))
-                except BlockingIOError:
-                    continue
-                if not chunk:
-                    selector.unregister(key.fileobj)
-                    continue
-                kept = chunk[:available]
-                stream, digest = streams[name]
-                stream.write(kept)
-                digest.update(kept)
-                raw['size'] += len(kept)
-                self.tool_bytes += len(kept)
-                self.payload_bytes += len(kept)
-                raw['partial_sha256'] = digest.hexdigest()
-                if len(kept) != len(chunk):
+                    try:
+                        chunk = os.read(key.fileobj.fileno(), min(65536, available + 1))
+                    except BlockingIOError:
+                        continue
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                        continue
+                    kept = chunk[:available]
+                    stream, digest = streams[name]
+                    stream.write(kept)
+                    digest.update(kept)
+                    raw['size'] += len(kept)
+                    self.tool_bytes += len(kept)
+                    self.payload_bytes += len(kept)
+                    raw['partial_sha256'] = digest.hexdigest()
+                    if len(kept) != len(chunk):
+                        if not cleanup:
+                            raise Incomplete('metadata output cap')
+                        run['cleanup_output_truncated'] = True
+                        selector.unregister(key.fileobj)
+                except BaseException as failure:
                     if not cleanup:
-                        raise Incomplete('metadata output cap')
-                    run['cleanup_output_truncated'] = True
-                    selector.unregister(key.fileobj)
+                        raise
+                    run['cleanup_errors'].append(f'{name} drain: {type(failure).__name__}: {failure}')
+                    failed_streams.add(name)
+                    try:
+                        selector.unregister(key.fileobj)
+                    except BaseException as unregister_error:
+                        run['cleanup_errors'].append(f'{name} unregister: {unregister_error}')
 
+        previous_handler = signal.signal(signal.SIGTERM, parent_signal)
         try:
             for name in ('stdout', 'stderr'):
                 raw = {'name': f'tools/{number:04d}.{name}.raw', 'size': 0,
@@ -643,30 +676,41 @@ class Census:
                 time.sleep(0.01)
         except BaseException as failure:
             error = failure
+            run['error'] = str(error)
         finally:
-            run['cleanup_errors'] = []
+            finalizing = True
 
             def cleanup_drain(wait):
+                nonlocal selector_failed
+                if selector_failed:
+                    time.sleep(wait)
+                    return
                 try:
                     drain(wait, cleanup=True)
                 except BaseException as failure:
-                    run['cleanup_errors'].append(str(failure))
-                    for key in list(selector.get_map().values()):
-                        selector.unregister(key.fileobj)
+                    selector_failed = True
+                    run['cleanup_errors'].append(f'selector drain: {type(failure).__name__}: {failure}')
+
+            def signal_group(signum):
+                try:
+                    os.killpg(child.pid, signum)
+                except ProcessLookupError:
+                    if signum == 0:
+                        run['group_closed'] = True
 
             if child is not None:
                 cleanup_end = min(time.monotonic() + 3, self.deadline)
-                for signum in (signal.SIGTERM, signal.SIGKILL):
-                    try:
-                        os.killpg(child.pid, signum)
-                    except ProcessLookupError:
-                        pass
-                    if signum == signal.SIGTERM and error is not None:
-                        grace = min(time.monotonic() + 1, cleanup_end)
-                        while time.monotonic() < grace:
-                            cleanup_drain(min(0.02, max(0, grace - time.monotonic())))
+                cleanup('owned TERM', signal_group, signal.SIGTERM)
+                if error is not None:
+                    grace = min(time.monotonic() + 1, cleanup_end)
+                    while time.monotonic() < grace:
+                        cleanup_drain(min(0.02, max(0, grace - time.monotonic())))
+                cleanup('owned KILL', signal_group, signal.SIGKILL)
                 while time.monotonic() < cleanup_end:
-                    pid, status, usage = os.wait4(child.pid, os.WNOHANG)
+                    waited = cleanup('wait4', os.wait4, child.pid, os.WNOHANG)
+                    if waited is None:
+                        break
+                    pid, status, usage = waited
                     if pid == child.pid:
                         self.child_cpu += usage.ru_utime + usage.ru_stime
                         run['child_cpu_seconds'] = usage.ru_utime + usage.ru_stime
@@ -674,24 +718,21 @@ class Census:
                         run.update(reaped=True, returncode=child.returncode)
                         break
                     cleanup_drain(min(0.01, max(0, cleanup_end - time.monotonic())))
-                while selector.get_map() and time.monotonic() < cleanup_end:
+                while not selector_failed and selector.get_map() and time.monotonic() < cleanup_end:
                     cleanup_drain(min(0.02, max(0, cleanup_end - time.monotonic())))
                 run['pipes_drained'] = (not selector.get_map() and not run['cleanup_errors'] and
                                         not run.get('cleanup_output_truncated', False))
-                try:
-                    os.killpg(child.pid, 0)
-                except ProcessLookupError:
-                    run['group_closed'] = True
+                cleanup('group closure observation', signal_group, 0)
                 for pipe in (child.stdout, child.stderr):
-                    pipe.close()
-            selector.close()
-            for stream, _digest in streams.values():
-                stream.flush()
-                os.fsync(stream.fileno())
-                stream.close()
+                    cleanup('pipe close', pipe.close)
+            cleanup('selector close', selector.close)
+            for name, (stream, _digest) in streams.items():
+                cleanup(f'{name} flush', stream.flush)
+                cleanup(f'{name} fsync', lambda: os.fsync(stream.fileno()))
+                cleanup(f'{name} close', stream.close)
             run['elapsed_seconds'] = time.monotonic() - started
-            run['error'] = None if error is None else str(error)
-            self.document(f'tools/{number:04d}.closed.json', run)
+            cleanup('closure record', self.document, f'tools/{number:04d}.closed.json', run)
+            cleanup('restore SIGTERM handler', signal.signal, signal.SIGTERM, previous_handler)
         try:
             self.capture(executable, 'tool-after-exec', eligible=True)
             if self.regular_row(executable)['raw'] != tool:
@@ -699,6 +740,7 @@ class Census:
         except BaseException as failure:
             if error is None:
                 error = failure
+                run['error'] = str(error)
             else:
                 run['tool_after_error'] = str(failure)
         if (error is not None or run['cleanup_errors'] or not run.get('pipes_drained') or
@@ -711,7 +753,8 @@ class Census:
         return run
 
     def metadata_facts(self, run):
-        if not run['complete'] or run['returncode'] != 0 or not run['reaped'] or not run['group_closed']:
+        if (not run.get('complete') or run.get('returncode') != 0 or
+                not run.get('reaped') or not run.get('group_closed')):
             raise Incomplete('metadata facts require complete raw output and closure')
         archived = [str(self.output / self.regular_row(path)['raw']['name']) for path in run['subjects']]
         operation = 'readelf' if run['argv'][0] == TOOLS['readelf'] else 'cache'
