@@ -17,7 +17,7 @@ from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib
 
 
-def owned_job(bus, unit, operation):
+def owned_job(bus, unit, operation, wait_seconds=15):
     manager = dbus.Interface(
         bus.get_object("org.freedesktop.systemd1", "/org/freedesktop/systemd1"),
         "org.freedesktop.systemd1.Manager",
@@ -49,7 +49,7 @@ def owned_job(bus, unit, operation):
         arg2=unit,
     )
     manager.Subscribe(timeout=5)
-    timer = GLib.timeout_add_seconds(15, timeout)
+    timer = GLib.timeout_add_seconds(wait_seconds, timeout)
     try:
         expected = str(operation(manager))
         if expected not in results:

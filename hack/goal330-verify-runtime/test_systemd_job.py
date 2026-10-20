@@ -19,11 +19,15 @@ from systemd_job import owned_job
 
 
 class OwnedJobTest(unittest.TestCase):
-    def exercise(self, result, path="/job/7"):
+    def exercise(self, result, path="/job/7", wait_seconds=15):
         bus = Mock()
         manager = Mock()
         loop = Mock()
-        operation = Mock(return_value="/job/7")
+        def mutate(_manager):
+            manager.Subscribe.assert_called_once_with(timeout=5)
+            return "/job/7"
+
+        operation = Mock(side_effect=mutate)
 
         def signal():
             callback = bus.add_signal_receiver.call_args.args[0]
@@ -32,21 +36,25 @@ class OwnedJobTest(unittest.TestCase):
         loop.run.side_effect = signal
         with patch("systemd_job.dbus.Interface", return_value=manager), patch(
             "systemd_job.GLib.MainLoop", return_value=loop
-        ), patch("systemd_job.GLib.timeout_add_seconds", return_value=1), patch(
+        ), patch("systemd_job.GLib.timeout_add_seconds", return_value=1) as timer, patch(
             "systemd_job.GLib.source_remove"
         ):
             try:
-                return owned_job(bus, "owned.slice", operation)
+                return owned_job(bus, "owned.slice", operation, wait_seconds=wait_seconds)
             finally:
                 self.assertEqual(
                     bus.add_signal_receiver.call_args.kwargs["arg2"], "owned.slice"
                 )
                 operation.assert_called_once_with(manager)
                 manager.Subscribe.assert_called_once_with(timeout=5)
+                self.assertEqual(timer.call_args.args[0], wait_seconds)
                 bus.close.assert_called_once()
 
     def test_requires_exact_successful_job(self):
         self.assertEqual(self.exercise("done"), "/job/7")
+
+    def test_stop_wait_outlasts_native_fifteen_second_stop(self):
+        self.assertEqual(self.exercise("done", wait_seconds=20), "/job/7")
 
     def test_rejects_failed_job(self):
         with self.assertRaisesRegex(RuntimeError, "failed owned job"):

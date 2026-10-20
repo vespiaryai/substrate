@@ -1,0 +1,10 @@
+6928035a4fa8174d2560efbfc44f078ebb862e5ed848fce783c2038e12bc7745  /usr/bin/dockerd
+84137d87a5bbb59d40b8142680bb54daf10152fcdaa1bede6bd340db32b4164b  /usr/bin/dockerd-rootless.sh
+c8c43309c7b3cbe8f0067a0090ad1acb6fe194f6e7a5c5cbfce399362b291b2a  /usr/bin/rootlesskit
+4efe447ba53c2a4eefc861d8b574ec617b76423abce1255a3a6c9124ac84c45a  /usr/bin/containerd
+e0a5c41e74ded65a1b299fbb3a9d6c752d93f1b7c31a5c7353eb5eb2b04ab313  /usr/bin/docker
+76285c91fc1ebcdf63e158c3d8fe109033067de4ae310f731b7546f9a8c8ce93  /usr/bin/pasta
+daab0f5bcc7bb92bc88892a730f63703393362d004d1181c74ca8252b91f6fc5  /usr/share/dbus-1/interfaces/org.freedesktop.systemd1.Manager.xml
+3372e80d88d6a7ab3a9fd754fb8daea2727b3d38bca0a071cc0bcee12a85d21e  /usr/share/dbus-1/interfaces/org.freedesktop.systemd1.Unit.xml
+5a82387665d16b841756b8397a85da4449ac77b53f777dc25a830f501b726fc7  /usr/share/dbus-1/interfaces/org.freedesktop.systemd1.Service.xml
+9aa76bebd6b2d0d4a1df3f499df69615561877ecb5ed2115ddbd7b853f3ed490  /usr/share/dbus-1/interfaces/org.freedesktop.systemd1.Slice.xml
