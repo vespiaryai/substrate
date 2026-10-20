@@ -39,7 +39,6 @@ ENVIRONMENT = {'PATH': '/usr/bin:/bin', 'HOME': '/home/zack', 'LC_ALL': 'C', 'LA
 TOOLS = {'readelf': '/usr/bin/readelf', 'cache': '/usr/sbin/ldconfig'}
 OBSERVER = Path(__file__).with_name('interpreter_observer.py')
 INTERPRETER = '/usr/bin/python3'
-# Installed support awaits independently reviewed source/build and startup joins.
 INTERPRETER_SUPPORT = None
 AUTHORITIES = dict.fromkeys(('application', 'import', 'offline', 'holder', 'finite', 'recheck', 'native'), False)
 GAPS = (
