@@ -25,7 +25,9 @@ from unittest.mock import patch
 
 
 SOURCE = Path(__file__).with_name('census_tools.py')
-FIXTURE = Path('/home/zack/.codex/orchestrate/vespiary-goal330/reviews/native-complete-corpus-projection/fixture-first')
+FIXTURE = Path('/home/zack/.codex/orchestrate/vespiary-goal330/reviews/native-projection-owner-completion/fixture-owner-complete-01')
+DECLARATIONS = {'loaded_sources_complete': True, 'module_report_complete': True,
+                'suite_output_bound_declared': True}
 spec = importlib.util.spec_from_file_location('census_tools_fixture', SOURCE)
 census_tools = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(census_tools)
@@ -337,20 +339,29 @@ Dynamic section at offset 0x100 contains 3 entries:
         paths = [self.inputs / name for name in ('a', 'b', 'profile', 'manifest')]
         for path, body in zip(paths, (b'abcd', b'xyz', b'p' * 10, b'm' * 20)):
             path.write_bytes(body)
+        membership = self.inputs / 'membership'
+        membership.mkdir()
+        for name in ('a', 'b'):
+            (membership / name).write_bytes(b'')
         owner = self.owner()
         for path in paths:
             owner.capture(str(path), 'budget-fixture')
+        owner.capture(str(membership), 'budget-membership')
         a, b, profile_path, manifest_path = map(str, paths)
         profile = {'application_enabled': False, 'import_inputs_reviewed': False,
                    'offline_reviewed': False, 'operations': {'holder': False, 'finite': False, 'recheck': False},
-                   'files': {a: hashlib.sha256(b'abcd').hexdigest()}, 'membership': {'fixture': ['a', 'b']}}
-        projection = owner.consumer_charges(profile, [a, b], profile_path, manifest_path)
+                   'stdlib_search': ['/declared/search'], 'required_absences': [],
+                   'files': {a: hashlib.sha256(b'abcd').hexdigest()}, 'membership': {str(membership): ['a', 'b']}}
+        complete = owner.serialized_projection(profile, [a, b], profile_path, manifest_path,
+                                               [], {}, {}, 0, DECLARATIONS)
+        projection = complete['archived']
         self.assertEqual(projection['entry']['loop_bytes'], 11)
         self.assertEqual(projection['entry']['total_read_bytes'], 41)
         self.assertEqual(projection['offline']['union_bytes'], 37)
         self.assertEqual(projection['import_report']['document_hex_bytes'], 60)
         self.assertIsNone(projection['entry']['fits_current_limits'])
         self.assertIsNone(projection['import_report']['full_serialized_bytes'])
+        self.assertGreater(complete['import_report']['full_serialized_bytes'], 60)
 
     def test_metadata_cancellation_continues_after_finalizer_errors(self):
         body = ('import os, signal, time\n'
@@ -740,7 +751,7 @@ Dynamic section at offset 0x100 contains 3 entries:
                    'files': {a: hashlib.sha256(b'\x00\xff').hexdigest()},
                    'membership': {}, 'required_absences': []}
         projection = owner.serialized_projection(profile, [a, b], profile_path, manifest_path,
-                                                 [a], {}, {'accepted': False}, 7)
+                                                 [a], {}, {'accepted': False}, 7, DECLARATIONS)
         manifest_body = (hashlib.sha256(b'\x00\xff').hexdigest() + '  ' + a + '\n' +
                          hashlib.sha256(b'xyz').hexdigest() + '  ' + b + '\n').encode()
         profile_body = json.dumps(profile, sort_keys=True).encode()
@@ -770,7 +781,214 @@ Dynamic section at offset 0x100 contains 3 entries:
         self.assertEqual(proposed['status'], 'source-unproved')
         with self.assertRaisesRegex(census_tools.Incomplete, 'self-referential'):
             owner.serialized_projection(profile, [profile_path], profile_path, manifest_path,
-                                        [a], {}, {}, 0)
+                                        [a], {}, {}, 0, DECLARATIONS)
+
+
+    def test_descendant_absence_and_all_absent_interpreter_roots(self):
+        owner = self.owner()
+        missing = str(self.inputs / 'missing')
+        descendant = missing + '/child/grandchild'
+        row = owner.capture(descendant, 'declared-absence', allowed_roots=(missing,))
+        self.assertEqual((row['kind'], row['errno'], row['absent_ancestor']), ('absent', 2, missing))
+        self.assertEqual(owner.paths[missing + '/child']['kind'], 'absent')
+        owner.reobserve(descendant)
+        with self.assertRaises(census_tools.Unsupported) as raised:
+            owner.interpreter_corpus([missing, missing + '/other'], [], ['.so'])
+        self.assertEqual(raised.exception.family, 'interpreter-corpus')
+        Path(missing).mkdir()
+        with self.assertRaisesRegex(census_tools.Incomplete, 'identity changed'):
+            owner.reobserve(descendant)
+
+    def test_linked_corpus_ancestor_refuses_before_target_bytes(self):
+        real = self.inputs / 'real'
+        real.mkdir()
+        (real / 'secret').write_bytes(b'never read through alias')
+        alias = self.inputs / 'alias'
+        alias.symlink_to('real')
+        owner = self.owner()
+        with self.assertRaises(census_tools.Unsupported) as raised:
+            owner.corpus_tree(str(alias / 'secret'), 'fixture')
+        self.assertEqual(raised.exception.family, 'corpus-ancestor-link')
+        self.assertNotIn(str(real), owner.paths)
+        self.assertEqual(owner.payload_bytes, 0)
+
+    def test_duplicate_module_and_mismatched_distribution_refuse(self):
+        modules, distributions = [], {}
+        for name in ('dbus', 'gi'):
+            package = self.inputs / name
+            package.mkdir()
+            initializer = package / '__init__.py'
+            initializer.write_bytes(b'literal initializer')
+            metadata = self.inputs / (name + '.METADATA')
+            metadata.write_text('Name: ' + name + '\nVersion: 1\nVersion: 2\n')
+            modules.append([name, str(initializer), True])
+            distributions[name] = [str(metadata), name, '1']
+        owner = self.owner()
+        with self.assertRaises(census_tools.Unsupported) as raised:
+            owner.package_corpus(modules + [modules[0]], distributions, ['.so'])
+        self.assertEqual(raised.exception.family, 'package-corpus')
+        with self.assertRaises(census_tools.Unsupported) as raised:
+            owner.package_corpus(modules, distributions, ['.so'])
+        self.assertEqual(raised.exception.family, 'distribution-metadata')
+
+    def test_document_aliases_and_duplicate_source_declarations_refuse(self):
+        a, profile_path, manifest_path = [str(self.inputs / name) for name in ('a.py', 'profile', 'manifest')]
+        for path in (a, profile_path, manifest_path):
+            Path(path).write_bytes(b'fixture')
+        alias = self.inputs / 'alias'
+        os.link(profile_path, alias)
+        symbolic = self.inputs / 'symbolic'
+        symbolic.symlink_to('manifest')
+        owner = self.owner()
+        for path in (a, profile_path, manifest_path):
+            owner.capture(path, 'fixture')
+        profile = {'application_enabled': False, 'import_inputs_reviewed': False,
+                   'offline_reviewed': False, 'operations': {'holder': False, 'finite': False, 'recheck': False},
+                   'stdlib_search': [], 'files': {}, 'membership': {}, 'required_absences': []}
+        with self.assertRaisesRegex(census_tools.Incomplete, 'duplicate manifest'):
+            owner.serialized_projection(profile, [a, a], profile_path, manifest_path,
+                                        [], {}, {}, 0, DECLARATIONS)
+        with self.assertRaisesRegex(census_tools.Incomplete, 'duplicate loaded'):
+            owner.serialized_projection(profile, [a], profile_path, manifest_path,
+                                        [a, a], {}, {}, 0, DECLARATIONS)
+        with self.assertRaisesRegex(census_tools.Incomplete, 'completeness declarations'):
+            owner.serialized_projection(profile, [a], profile_path, manifest_path,
+                                        [], {}, {}, 0, {})
+        owner.capture(str(alias), 'fixture-alias')
+        with self.assertRaisesRegex(census_tools.Incomplete, 'document alias'):
+            owner.proposed_profile(profile, profile_path, manifest_path)
+        with self.assertRaisesRegex(census_tools.Incomplete, 'document alias'):
+            owner.serialized_projection(profile, [a], profile_path, manifest_path,
+                                        [], {}, {}, 0, DECLARATIONS)
+        owner.capture(str(symbolic), 'fixture-symbolic-document')
+        with self.assertRaisesRegex(census_tools.Incomplete, 'document aliases'):
+            owner.document_paths(profile_path, str(symbolic))
+
+    def test_supplied_interpreter_record_is_source_correlated_and_never_host_proof(self):
+        executable = self.inputs / 'python'
+        executable.write_bytes(b'not a real interpreter, never executed')
+        executable.chmod(0o700)
+        root = self.inputs / 'stdlib'
+        root.mkdir()
+        source = self.inputs / 'record.json'
+        record = {'executable': str(executable), 'prefix': str(root), 'base_prefix': str(root),
+                  'version': 'literal fixture version', 'search': [str(root)], 'builtins': ['sys'],
+                  'frozen': ['_frozen_importlib'], 'extension_suffixes': ['.fixture.so', '.so'],
+                  'identities': {str(path): census_tools.identity(path.stat()) for path in (executable, root)},
+                  'executable_sha256': hashlib.sha256(executable.read_bytes()).hexdigest(),
+                  'declarations_complete': True}
+        source.write_bytes(json.dumps(record).encode())
+        owner = self.owner()
+        digest = hashlib.sha256(source.read_bytes()).hexdigest()
+        result = owner.supplied_interpreter(record, str(source), digest)
+        self.assertEqual(result['basis'], 'supplied-source-correlated-record')
+        self.assertFalse(result['host_observed'])
+        self.assertEqual(result['record']['builtins'], ['sys'])
+        self.assertFalse(any(result['authorities'].values()))
+        changed = json.loads(json.dumps(record))
+        changed['extension_suffixes'] = ['.so', '.so']
+        with self.assertRaisesRegex(census_tools.Unsupported, 'differs from archived source'):
+            owner.supplied_interpreter(changed, str(source), digest)
+        with self.assertRaisesRegex(census_tools.Unsupported, 'source digest differs'):
+            owner.supplied_interpreter(record, str(source), '0' * 64)
+
+    def test_combined_acquisition_json_exact_limit_and_one_byte_overflow(self):
+        owner = self.owner()
+        projection = {'literal': '\u00e9', 'maps': [{'files': {}}, {'files': {}}]}
+        final = {'status': 'incomplete', 'selection': 'unobserved', 'authorities': census_tools.AUTHORITIES}
+        documents, charge = owner.projection_documents(projection, final)
+        literal_total = owner.json_bytes + sum(len(json.dumps(value, sort_keys=True, ensure_ascii=True,
+            separators=(',', ':')).encode('ascii')) + 1 for value in documents.values())
+        self.assertEqual(charge['combined']['bytes_or_records'], literal_total)
+        self.assertEqual(census_tools.producer_size({'x': '\u00e9'}), 15)
+        with patch.object(census_tools, 'JSON_BYTES', literal_total - 1):
+            _documents, overflow = owner.projection_documents(projection, final)
+            self.assertEqual(overflow['combined']['excess'], 1)
+            with self.assertRaisesRegex(census_tools.Incomplete, 'combined acquisition JSON cap'):
+                owner.publish_projection(projection, final)
+            self.assertFalse((self.output / 'budget-projection.json').exists())
+        with patch.object(census_tools, 'JSON_BYTES', literal_total):
+            accepted = owner.publish_projection(projection, final)
+            self.assertTrue(accepted['combined']['fits'])
+            self.assertEqual(owner.json_bytes, literal_total)
+        for name in documents:
+            self.assertTrue((self.output / name).read_bytes().endswith(b'\n'))
+        self.assertFalse((self.output / 'result.json').exists())
+
+    def test_supplied_interpreter_rejects_incomplete_and_mismatched_fields(self):
+        executable = self.inputs / 'python'
+        executable.write_bytes(b'fixture executable bytes')
+        executable.chmod(0o700)
+        root = self.inputs / 'stdlib'
+        root.mkdir()
+        base = {'executable': str(executable), 'prefix': str(root), 'base_prefix': str(root),
+                'version': 'fixture', 'search': [str(root)], 'builtins': ['sys'],
+                'frozen': ['_frozen_importlib'], 'extension_suffixes': ['.so'],
+                'identities': {str(path): census_tools.identity(path.stat()) for path in (executable, root)},
+                'executable_sha256': hashlib.sha256(executable.read_bytes()).hexdigest(),
+                'declarations_complete': True}
+        cases = [('declarations_complete', False), ('version', ''), ('builtins', ['sys', 'sys']),
+                 ('frozen', ['sys']), ('extension_suffixes', ['.py']), ('identities', {}),
+                 ('executable_sha256', '0' * 64), ('search', [])]
+        records = []
+        for index, (key, value) in enumerate(cases):
+            record = {**base, key: value}
+            source = self.inputs / f'record-{index}.json'
+            source.write_bytes(json.dumps(record).encode())
+            records.append((record, source, hashlib.sha256(source.read_bytes()).hexdigest()))
+        owner = self.owner()
+        for record, source, digest in records:
+            with self.subTest(source=source.name):
+                with self.assertRaises(census_tools.Unsupported) as raised:
+                    owner.supplied_interpreter(record, str(source), digest)
+                self.assertEqual(raised.exception.family, 'interpreter-record')
+
+    def test_actual_eight_mib_combined_producer_boundary(self):
+        owner = self.owner()
+        final = {'status': 'incomplete', 'selection': 'unobserved', 'authorities': census_tools.AUTHORITIES}
+        projection = {'padding': ''}
+        _documents, empty = owner.projection_documents(projection, final)
+        padding = 8388608 - empty['combined']['bytes_or_records']
+        projection['padding'] = 'x' * padding
+        _documents, exact = owner.projection_documents(projection, final)
+        self.assertEqual(exact['combined'], {'bytes_or_records': 8388608, 'cap': 8388608,
+                                            'excess': 0, 'fits': True})
+        projection['padding'] += 'x'
+        _documents, overflow = owner.projection_documents(projection, final)
+        self.assertEqual(overflow['combined'], {'bytes_or_records': 8388609, 'cap': 8388608,
+                                               'excess': 1, 'fits': False})
+        with self.assertRaisesRegex(census_tools.Incomplete, 'combined acquisition JSON cap'):
+            owner.publish_projection(projection, final)
+        projection['padding'] = projection['padding'][:-1]
+        owner.publish_projection(projection, final)
+        self.assertEqual(owner.json_bytes, 8388608)
+        self.assertEqual(sum(path.stat().st_size for path in self.output.rglob('*') if path.is_file()), 8388608)
+
+    def test_projection_counts_source_and_repeated_extension_report_reads(self):
+        paths = [str(self.inputs / name) for name in ('a.py', 'b.so', 'profile', 'manifest')]
+        for path, body in zip(paths, (b'ab', b'xyz', b'old profile', b'old manifest')):
+            Path(path).write_bytes(body)
+        owner = self.owner()
+        for path in paths:
+            owner.capture(path, 'fixture')
+        source, extension, profile_path, manifest_path = paths
+        profile = {'application_enabled': False, 'import_inputs_reviewed': False,
+                   'offline_reviewed': False, 'operations': {'holder': False, 'finite': False, 'recheck': False},
+                   'stdlib_search': [], 'files': {extension: hashlib.sha256(b'xyz').hexdigest()},
+                   'membership': {}, 'required_absences': []}
+        module = {'origin': extension, 'search': None, 'size': 3, 'sha256': hashlib.sha256(b'xyz').hexdigest()}
+        modules = {'binding': module, 'alias': module}
+        projection = owner.serialized_projection(profile, [source, extension], profile_path, manifest_path,
+                                                 [source], modules, {}, 0, DECLARATIONS)
+        self.assertEqual(projection['entry']['loop_bytes'], 8)
+        self.assertEqual(projection['entry']['loaded_source_read_bytes'], 2)
+        self.assertEqual(projection['entry']['extension_report_read_bytes'], 6)
+        self.assertEqual(projection['entry']['all_declared_read_bytes'],
+                         projection['entry']['total_read_bytes'] + 8)
+        bad = {'binding': {**module, 'size': 4}}
+        with self.assertRaisesRegex(census_tools.Incomplete, 'differs from archived buffer'):
+            owner.serialized_projection(profile, [source, extension], profile_path, manifest_path,
+                                        [source], bad, {}, 0, DECLARATIONS)
 
 
 if __name__ == '__main__':

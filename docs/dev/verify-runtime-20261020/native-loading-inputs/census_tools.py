@@ -38,11 +38,11 @@ ENVIRONMENT = {'PATH': '/usr/bin:/bin', 'HOME': '/home/zack', 'LC_ALL': 'C', 'LA
 TOOLS = {'readelf': '/usr/bin/readelf', 'cache': '/usr/sbin/ldconfig'}
 AUTHORITIES = dict.fromkeys(('application', 'import', 'offline', 'holder', 'finite', 'recheck', 'native'), False)
 GAPS = (
-    'GIRepository glib2-2.88.4-1.fc44 compiled repository and library defaults lack build-correlated source',
-    'glibc-2.43-9.fc44 default and hwcaps families lack build-correlated source',
-    'openssl-3.5.9-1.fc44 compiled directories and complete configuration interpretation remain ungrounded',
+    'GIRepository build-correlated defaults await fixed declarations and namespace/library closure',
+    'glibc build-correlated defaults await RPATH, cache, environment and hwcaps candidate closure',
+    'OpenSSL build-correlated defaults await complete contextual configuration and provider closure',
     'maintained-tool process ownership and authored text grammars are unproved; bootstrap closure is not implemented',
-    'complete corpus, pkgutil portions, actor graph and consumer serialization projection are not implemented',
+    'supplied corpus and projection await proof; actor graph, runtime census and profile publication remain gated',
 )
 
 
@@ -59,6 +59,11 @@ class Unsupported(Incomplete):
 
 def consumer_json(value):
     return json.dumps(value, sort_keys=True, allow_nan=False).encode('utf-8')
+
+
+def producer_size(value):
+    return len(json.dumps(value, sort_keys=True, ensure_ascii=True,
+                          separators=(',', ':'), allow_nan=False).encode('ascii')) + 1
 
 
 def serialized_size(value, limit):
@@ -345,11 +350,14 @@ class Census:
             self._json_write(stream, {'path': path, 'observation': self.paths[path]}, JSON_BYTES // 2)
 
     def _json_write(self, stream, value, limit):
+        amount = producer_size(value)
+        if amount > limit or self.json_bytes + amount > JSON_BYTES:
+            raise Incomplete('generated JSON cap')
         encoder = json.JSONEncoder(sort_keys=True, ensure_ascii=True, separators=(',', ':'), allow_nan=False)
         try:
             for chunk in encoder.iterencode(value):
                 body = chunk.encode('ascii')
-                if self.json_bytes + len(body) + 1 > limit:
+                if self.json_bytes + len(body) + 1 > JSON_BYTES:
                     raise Incomplete('generated JSON cap')
                 self.json_bytes += len(body)
                 stream.write(body)
@@ -381,7 +389,7 @@ class Census:
             raise Incomplete('directory descriptor changed')
         return descriptor
 
-    def capture(self, path, reason, eligible=False, candidate=False, allowed_roots=()):
+    def capture(self, path, reason, eligible=False, candidate=False, allowed_roots=(), ordinary=False):
         path = absolute(path)
         if allowed_roots and not any(path == root or path.startswith(root + '/') for root in allowed_roots):
             raise Unsupported('corpus-destination', path, 'outside declared ordinary roots')
@@ -393,6 +401,8 @@ class Census:
             raise Incomplete('path or symlink cycle')
         if path in self.paths:
             row = self.paths[path]
+            if ordinary and row.get('kind') == 'symlink':
+                raise Unsupported('corpus-ancestor-link', path, 'linked ancestors are unsupported')
             self.reobserve(path)
             if reason not in row['reasons']:
                 self.charge(1)
@@ -404,6 +414,17 @@ class Census:
             return row
         self.active.add(path)
         try:
+            if path != '/':
+                parent_path = str(Path(path).parent)
+                parent_row = self.capture(parent_path, 'ancestry', ordinary=ordinary or bool(allowed_roots))
+                if parent_row['kind'] == 'absent':
+                    self.charge(1)
+                    row = {'reasons': [reason], 'eligible': eligible, 'candidate': candidate,
+                           'complete': True, 'kind': 'absent', 'parent': parent_path,
+                           'errno': 2, 'absent_ancestor': parent_row.get('absent_ancestor', parent_path)}
+                    self.paths[path] = row
+                    self.progress(path)
+                    return row
             parent = self.directory_fd(str(Path(path).parent)) if path != '/' else os.open(
                 '/', os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
             try:
@@ -436,6 +457,8 @@ class Census:
                             raise Incomplete('link target cap')
                         next_path = os.path.normpath(os.path.join(str(Path(path).parent), target))
                         row.update(kind='symlink', target=target, target_path=next_path)
+                        if ordinary:
+                            raise Unsupported('corpus-ancestor-link', path, 'linked ancestors are unsupported')
                         if identity(os.stat(name, dir_fd=parent, follow_symlinks=False)) != row['before']:
                             raise Incomplete('link changed')
                         self.capture(next_path, 'link:' + path, eligible, candidate, allowed_roots)
@@ -512,6 +535,9 @@ class Census:
         row = self.paths[path]
         if not row['complete']:
             raise Incomplete('incomplete observation reused')
+        if 'absent_ancestor' in row:
+            self.reobserve(row['absent_ancestor'])
+            return
         parent = self.directory_fd(str(Path(path).parent)) if path != '/' else os.open(
             '/', os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
         try:
@@ -610,6 +636,8 @@ class Census:
     def interpreter_corpus(self, search, package_boundaries, extension_suffixes):
         if not search or not extension_suffixes:
             raise Unsupported('interpreter-corpus', '', 'missing search or extension suffix declarations')
+        if len(set(search)) != len(search) or len(set(extension_suffixes)) != len(extension_suffixes):
+            raise Unsupported('interpreter-corpus', '', 'duplicate search or suffix declaration')
         directories = 0
         for path in search:
             self.capture(path, 'interpreter-search', allowed_roots=tuple(search))
@@ -623,7 +651,54 @@ class Census:
         if not directories:
             raise Unsupported('interpreter-corpus', '', 'no present interpreter corpus directory')
 
+    def supplied_interpreter(self, record, source, digest):
+        self.capture(source, 'supplied-interpreter-record')
+        if self.regular_row(source)['raw']['sha256'] != digest:
+            raise Unsupported('interpreter-record', source, 'source digest differs')
+        if json.loads(self.small_body(source)) != record:
+            raise Unsupported('interpreter-record', source, 'supplied record differs from archived source')
+        fields = {'executable', 'prefix', 'base_prefix', 'version', 'search', 'builtins',
+                  'frozen', 'extension_suffixes', 'identities', 'executable_sha256', 'declarations_complete'}
+        if not isinstance(record, dict) or set(record) != fields or record['declarations_complete'] is not True:
+            raise Unsupported('interpreter-record', source, 'explicit complete declarations required')
+        if not isinstance(record['version'], str) or not record['version']:
+            raise Unsupported('interpreter-record', source, 'missing version')
+        for key in ('search', 'builtins', 'frozen', 'extension_suffixes'):
+            values = record[key]
+            if (not isinstance(values, list) or not values or
+                    any(not isinstance(value, str) or not value for value in values) or
+                    len(set(values)) != len(values)):
+                raise Unsupported('interpreter-record', source, 'invalid or duplicate ' + key)
+        if set(record['builtins']) & set(record['frozen']):
+            raise Unsupported('interpreter-record', source, 'built-in and frozen declarations overlap')
+        if any(not re.fullmatch(r'\.[A-Za-z0-9_.-]+\.so|\.so', suffix)
+               for suffix in record['extension_suffixes']):
+            raise Unsupported('interpreter-record', source, 'unsupported extension suffix')
+        paths = {absolute(record[key]) for key in ('executable', 'prefix', 'base_prefix')}
+        paths.update(absolute(path) for path in record['search'])
+        if not isinstance(record['identities'], dict) or set(record['identities']) != paths:
+            raise Unsupported('interpreter-record', source, 'exact path identities required')
+        for path in sorted(paths):
+            self.capture(path, 'supplied-interpreter-identity')
+            _target, row = self.resolved(path)
+            observed = None if row['kind'] == 'absent' else row['before']
+            if observed != record['identities'][path]:
+                raise Unsupported('interpreter-record', path, 'identity differs from supplied source')
+        executable = self.regular_row(record['executable'])
+        if executable['raw']['sha256'] != record['executable_sha256']:
+            raise Unsupported('interpreter-record', record['executable'], 'executable digest differs')
+        if not executable['before']['st_mode'] & 0o111:
+            raise Unsupported('interpreter-record', record['executable'], 'executable mode required')
+        for key in ('prefix', 'base_prefix'):
+            if self.resolved(record[key])[1]['kind'] != 'directory':
+                raise Unsupported('interpreter-record', record[key], 'prefix directory required')
+        return {'basis': 'supplied-source-correlated-record', 'host_observed': False,
+                'record': record, 'source': source, 'sha256': digest, 'authorities': AUTHORITIES}
+
     def package_corpus(self, modules, distributions, extension_suffixes):
+        names = [name for name, _path, _package in modules]
+        if len(names) != len(set(names)):
+            raise Unsupported('package-corpus', '', 'duplicate module declaration')
         packages = {name: path for name, path, package in modules if package}
         if set(packages) != {'dbus', 'gi'} or set(distributions) != {'dbus', 'gi'}:
             raise Unsupported('package-corpus', '', 'dbus and gi declarations are both required')
@@ -633,7 +708,8 @@ class Census:
             metadata, distribution, version = distributions[name]
             self.capture(metadata, 'distribution-metadata:' + name)
             fields = self.small_body(metadata).decode('utf-8', errors='strict').splitlines()
-            if fields.count('Name: ' + distribution) != 1 or fields.count('Version: ' + version) != 1:
+            if ([line for line in fields if line.startswith('Name:')] != ['Name: ' + distribution] or
+                    [line for line in fields if line.startswith('Version:')] != ['Version: ' + version]):
                 raise Unsupported('distribution-metadata', metadata, 'name or version differs')
         for name, path, package in modules:
             self.capture(path, 'explicit-module:' + name, candidate=not package)
@@ -948,42 +1024,35 @@ class Census:
         return {'scope': 'authored-text-grammar-only', 'facts': facts, 'selection': 'unobserved',
                 'tool_output_qualified': False, 'bootstrap_closed': False, 'authorities': AUTHORITIES}
 
-    def consumer_charges(self, profile, source_paths, profile_path, manifest_path):
-        disabled(profile)
-        sizes = {path: self.regular_row(path)['raw']['size'] for path in
-                 set(profile['files']) | set(source_paths) | {profile_path, manifest_path}}
-        profile_bytes = sizes[profile_path]
-        manifest_bytes = sizes[manifest_path]
-        entry_loop = sum(sizes[path] for path in profile['files']) + sum(sizes[path] for path in source_paths)
-        largest = max(sizes.values(), default=0)
-        membership_names = sum(len(names) for names in profile['membership'].values())
-        largest_membership = max((len(names) for names in profile['membership'].values()), default=0)
-        entry_exceeds = (entry_loop > 536870912 or largest > 134217728 or
-                         largest_membership > 4096 or profile_bytes > 1048576 or manifest_bytes > 1048576)
-        union = sum(sizes.values())
-        offline_exceeds = (union > 536870912 or largest > 134217728 or len(sizes) > 4096 or
-                           largest_membership > 4096 or profile_bytes > 1048576 or manifest_bytes > 1048576)
-        return {'status': 'incomplete', 'authorities': AUTHORITIES, 'selection': 'unobserved',
-                'basis': 'exact archived sizes for the declared profile and source manifest only',
-                'entry': {'loop_bytes': entry_loop, 'document_bytes': profile_bytes + manifest_bytes,
-                          'total_read_bytes': entry_loop + profile_bytes + manifest_bytes,
-                          'fits_current_limits': False if entry_exceeds else None},
-                'offline': {'union_bytes': union, 'union_paths': len(sizes),
-                            'fits_current_limits': False if offline_exceeds else None},
-                'largest_file_bytes': largest, 'membership_names': membership_names,
-                'largest_membership': largest_membership,
-                'import_report': {'document_hex_bytes': 2 * (profile_bytes + manifest_bytes),
-                                  'source_buffer_hex_bytes': None, 'full_serialized_bytes': None},
-                'snapshot_map_serialized_bytes': None, 'producer_output_bytes': None,
-                'proposed_profile_serialized_bytes': None,
-                'remaining_gates': ['complete corpus and candidate closure', 'proposed profile serialization',
-                                    'actual snapshot map and source-buffer report serialization',
-                                    'matching entry and offline membership/JSON and producer limits']}
+    def document_paths(self, profile_path, manifest_path):
+        documents = {absolute(profile_path), absolute(manifest_path)}
+        if len(documents) != 2:
+            raise Incomplete('self-referential document aliases')
+        identities = set()
+        for path in documents:
+            current = path
+            while True:
+                if self.paths[current]['kind'] == 'symlink':
+                    raise Incomplete('self-referential document aliases or linked ancestors')
+                if current == '/':
+                    break
+                current = str(Path(current).parent)
+            row = self.regular_row(path)
+            node = (row['before']['st_dev'], row['before']['st_ino'])
+            if node in identities:
+                raise Incomplete('self-referential document aliases')
+            identities.add(node)
+        for path, row in self.paths.items():
+            if row.get('complete') and row['kind'] in ('regular', 'symlink'):
+                target = self.resolved(path)[1]
+                if target['kind'] == 'regular' and path not in documents and (
+                        target['before']['st_dev'], target['before']['st_ino']) in identities:
+                    raise Incomplete('self-referential document alias membership')
+        return documents
 
     def proposed_profile(self, template, profile_path, manifest_path):
         disabled(template)
-        documents = {absolute(profile_path), absolute(manifest_path)}
-        documents.update(self.resolved(path)[0] for path in tuple(documents))
+        documents = self.document_paths(profile_path, manifest_path)
         profile = json.loads(consumer_json(template))
         profile['files'] = {}
         profile['membership'] = {}
@@ -1006,10 +1075,14 @@ class Census:
         return profile
 
     def serialized_projection(self, profile, source_paths, profile_path, manifest_path,
-                              loaded_sources, modules, suite_summary, suite_text_bytes):
+                              loaded_sources, modules, suite_summary, suite_text_bytes, declarations):
         disabled(profile)
+        if (not isinstance(declarations, dict) or
+                set(declarations) != {'loaded_sources_complete', 'module_report_complete', 'suite_output_bound_declared'} or
+                any(value is not True for value in declarations.values())):
+            raise Incomplete('explicit supplied projection completeness declarations required')
         profile_path, manifest_path = absolute(profile_path), absolute(manifest_path)
-        documents = {profile_path, manifest_path}
+        documents = self.document_paths(profile_path, manifest_path)
         if (documents & (set(profile['files']) | set(source_paths)) or
                 len(set(source_paths)) != len(source_paths)):
             raise Incomplete('self-referential documents or duplicate manifest rows')
@@ -1066,6 +1139,18 @@ class Census:
         snapshot_size = serialized_size(snapshot, JSON_BYTES)
         sources = {}
         source_hex = 0
+        extension_reads = 0
+        for name, module in modules.items():
+            if not isinstance(name, str) or not isinstance(module, dict):
+                raise Incomplete('invalid supplied module report')
+            origin = module.get('origin')
+            if isinstance(origin, str) and origin.endswith('.so'):
+                if origin not in paths:
+                    raise Incomplete('module extension lacks declared buffer')
+                raw = self.regular_row(origin)['raw']
+                if module.get('size') != raw['size'] or module.get('sha256') != raw['sha256']:
+                    raise Incomplete('module extension report differs from archived buffer')
+                extension_reads += raw['size']
         for path in loaded_sources:
             if path not in paths or not path.endswith('.py'):
                 raise Incomplete('loaded source lacks declared Python buffer')
@@ -1083,6 +1168,10 @@ class Census:
             raise Incomplete('suite text requires a nonnegative declared byte count')
         loop = sum(sizes[path] for path in profile['files']) + sum(sizes[path] for path in source_paths)
         union = sum(sizes.values())
+        archived_sizes = {path: self.regular_row(path)['raw']['size'] for path in paths}
+        archived_documents = sum(archived_sizes[path] for path in documents)
+        archived_union = sum(archived_sizes.values())
+        archived_largest = max(archived_sizes.values(), default=0)
         largest = max(sizes.values(), default=0)
         membership = max(map(len, profile['membership'].values()), default=0)
         current = {'entry_loop': limit_charge(loop, 536870912),
@@ -1107,12 +1196,24 @@ class Census:
                     'snapshot_map': limit_charge(snapshot_size, JSON_BYTES),
                     'import_report': limit_charge(report_size, 25165824),
                     'suite_output': limit_charge(report_size + 1 + summary_size + suite_text_bytes, 33554432)}
+        archived_fits = (archived_largest <= 134217728 and archived_documents <= 2097152 and
+                         all(archived_sizes[path] <= 1048576 for path in documents) and
+                         membership <= 4096)
         return {'status': 'incomplete', 'selection': 'unobserved', 'authorities': AUTHORITIES,
                 'basis': 'exact serialization of supplied declarations and archived buffers; no runtime module observation',
+                'declarations': declarations,
                 'profile': profile, 'manifest_hex': manifest_body.hex(), 'snapshot': snapshot,
                 'current': current, 'proposed': proposed,
                 'entry': {'loop_bytes': loop, 'document_bytes': profile_size + len(manifest_body),
-                          'total_read_bytes': loop + profile_size + len(manifest_body)},
+                          'total_read_bytes': loop + profile_size + len(manifest_body),
+                          'loaded_source_read_bytes': source_hex // 2, 'extension_report_read_bytes': extension_reads,
+                          'all_declared_read_bytes': loop + profile_size + len(manifest_body) + source_hex // 2 + extension_reads},
+                'archived': {'entry': {'loop_bytes': loop, 'total_read_bytes': loop + archived_documents,
+                                      'fits_current_limits': None if archived_fits and loop <= 536870912 else False},
+                             'offline': {'union_bytes': archived_union,
+                                         'fits_current_limits': None if archived_fits and archived_union <= 536870912 and len(paths) <= 4096 else False},
+                             'import_report': {'document_hex_bytes': 2 * archived_documents,
+                                               'full_serialized_bytes': None}},
                 'offline': {'union_bytes': union, 'union_paths': len(paths),
                             'two_snapshot_payload_bytes': 2 * union,
                             'two_snapshot_map_bytes': 2 * snapshot_size},
@@ -1129,6 +1230,29 @@ class Census:
                 'remaining_gates': ['complete actor and tool bootstrap closure', 'actual module and suite text bounds',
                                     'generated document metadata is hypothetical at archived document identities',
                                     'matching consumer source changes and separately granted proof']}
+
+    def projection_documents(self, projection, final_record):
+        authorities = final_record.get('authorities')
+        if (final_record.get('status') != 'incomplete' or
+                not isinstance(authorities, dict) or set(authorities) != set(AUTHORITIES) or
+                any(value is not False for value in authorities.values()) or
+                final_record.get('selection') != 'unobserved'):
+            raise Incomplete('projection final record cannot grant acquisition authority')
+        documents = {'census.json': {'status': 'incomplete', 'paths': self.paths,
+                                    'authorities': AUTHORITIES, 'selection': 'unobserved'},
+                     'budget-projection.json': projection, 'projection-final.json': final_record}
+        charges = {name: producer_size(value) for name, value in documents.items()}
+        total = self.json_bytes + sum(charges.values())
+        return documents, {'already_written_bytes': self.json_bytes, 'records': charges,
+                           'combined': limit_charge(total, JSON_BYTES)}
+
+    def publish_projection(self, projection, final_record):
+        documents, charge = self.projection_documents(projection, final_record)
+        if not charge['combined']['fits']:
+            raise Incomplete('combined acquisition JSON cap')
+        for name, value in documents.items():
+            self.document(name, value)
+        return charge
 
     def failure(self, error):
         self.document('census.json', {'status': 'incomplete', 'paths': self.paths,
