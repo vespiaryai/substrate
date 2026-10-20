@@ -2,5 +2,7 @@
 3852ad45c4d8d2bd6988b4b08e8085a3fa044c45b391e07ba2807e75b9c405db  hack/goal330-verify-runtime/test_daemon_bootstrap.py
 6abe7b88a0916aa4271e831b0b1c80395ba56c87b68084aca0dea7c49e4f3f5c  hack/goal330-verify-runtime/systemd_job.py
 adb0916f9866a012b7ae6ded920cade5fce982f1dd85323d4d25e94b9479d37b  hack/goal330-verify-runtime/test_systemd_job.py
-5e9e033e37d64e43ddb97f26f7ed4d4bf6eece8d66915c78304c8930d3c5c646  docs/dev/verify-runtime-20261020/daemon-only.md
+a607caaa74134da7bf0f55c8869dd49a4e13a4c472f2c075067f3c2cd44c16b4  docs/dev/verify-runtime-20261020/daemon-only.md
 d5be5538afdb9931b8d11736ec5e3d9498e64e125a8576351dcf36711d9533d8  docs/dev/verify-runtime-20261020/daemon-only-native.sha256
+d8894e632323e8e69b8ec9e47fc3e3fc0acb89652fcd86e993bcd200f13d226d  docs/dev/verify-runtime-20261020/daemon-only-mock-proposal.md
+d8023cab288db04e7b3efae7279d670bc3e473036e817b76361047c947d3c5b8  docs/dev/verify-runtime-20261020/daemon-only-mock-native.sha256

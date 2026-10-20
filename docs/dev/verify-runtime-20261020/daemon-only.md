@@ -39,7 +39,11 @@ It writes the pending receipt with `O_EXCL`, `O_NOFOLLOW`, a file fsync, and a p
 The receipt records the fixed nonce, source hashes, boot, keeper PID/start time, units, private paths, endpoint, and 300-second proposal.
 An existing receipt refuses another attempt before any unit or private-path creation.
 Companion files append parent, daemon, observation, stopped, closed, or failed evidence under distinct exclusive names.
-A failure leaves the live keeper's lock descriptor open. Process death releases flock.
+Inside the guarded body, the exception handler writes `.failed.json` and re-raises.
+The entrypoint then exits and the kernel releases its flock descriptor.
+The keeper does not park or remain alive to retain the lock after failure.
+Failures before the guarded body, or failure to write the failed companion, can leave only the pending receipt.
+Native SIGALRM or other process death also releases flock without guaranteeing a failed companion or cleanup.
 Neither a free flock nor absent API is permission to grant another heavy slot.
 Root must reconcile the same recorded identities if the attempt lacks positive closure or has a failed companion.
 No new nonce, automatic retry, recovery daemon, queue, or supervisor exists.
@@ -95,15 +99,12 @@ The source contract and actual native controls support scoped placement proof. T
 
 ## Prepare the future checks without running them now
 
-After source inspection and reservation, run the focused tests through the installed Python and native modules.
-This command was not executed during preparation.
-
-```sh
-/usr/bin/env -i PATH=/usr/bin:/bin HOME=/home/zack PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -m unittest discover -s hack/goal330-verify-runtime -p 'test_*.py'
-```
-
-Freeze both Python source files and both test files before and after that command.
-A changed oracle invalidates the affected result. Root separately owns the change-and-restore refusal proof.
+Use the [bounded mock qualification proposal](daemon-only-mock-proposal.md) for root's later test-scope decision.
+It selects exactly the two test modules, preserves the canonical guard, and requires native validation-unit closure before lock release.
+Dropin validation must release its heavy slot before root can grant this separate test attempt.
+Neither this proposal nor the test source authorizes execution now.
+Freeze actual source, test, guard, native, and proposed command bytes before and after the granted command.
+A changed oracle invalidates the affected result. The proposal includes an owned-fixture guard-refusal control.
 The installed XML test fails on a missing native contract. It does not skip or contact systemd.
 Mock tests cover zero-object refusals, private containerd identity, actual resource limits, finite properties, pending-receipt reuse, changed invocations, and denial handling.
 
