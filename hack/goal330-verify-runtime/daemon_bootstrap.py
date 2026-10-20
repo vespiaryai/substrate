@@ -28,7 +28,7 @@ import dbus
 from systemd_job import owned_job, user_bus
 
 
-NONCE = "b7a6306f20fabfaab02a29eaecf04531"
+NONCE = "18ec13b3d43234b8ab4f79fbc49e0c1d"
 BASE = "de861e9585cc3bc92fb0d87c0da37dee4ca765a2"
 P = Path(f"/home/zack/.local/share/vesverify{NONCE}")
 R = Path(f"/run/user/1000/vesverify{NONCE}")
