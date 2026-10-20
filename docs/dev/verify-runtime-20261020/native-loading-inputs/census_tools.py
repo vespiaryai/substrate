@@ -434,6 +434,34 @@ class Census:
             resource.setrlimit(resource.RLIMIT_FSIZE, (FILE_BYTES, FILE_BYTES))
             resource.setrlimit(resource.RLIMIT_NOFILE, (32, 32))
 
+        def drain(wait, cleanup=False):
+            for key, _mask in selector.select(wait):
+                name = key.data
+                raw = run['streams'][name]
+                cap = 2097152 if name == 'stdout' else 262144
+                available = max(0, min(cap - raw['size'], 33554432 - self.tool_bytes,
+                                       self.total_bytes - self.payload_bytes))
+                try:
+                    chunk = os.read(key.fileobj.fileno(), min(65536, available + 1))
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                kept = chunk[:available]
+                stream, digest = streams[name]
+                stream.write(kept)
+                digest.update(kept)
+                raw['size'] += len(kept)
+                self.tool_bytes += len(kept)
+                self.payload_bytes += len(kept)
+                raw['partial_sha256'] = digest.hexdigest()
+                if len(kept) != len(chunk):
+                    if not cleanup:
+                        raise Incomplete('metadata output cap')
+                    run['cleanup_output_truncated'] = True
+                    selector.unregister(key.fileobj)
+
         try:
             for name in ('stdout', 'stderr'):
                 raw = {'name': f'tools/{number:04d}.{name}.raw', 'size': 0,
@@ -451,34 +479,15 @@ class Census:
                                      start_new_session=True, preexec_fn=child_limits)
             run['pid'] = child.pid
             run['pgid'] = child.pid
-            self.document(f'tools/{number:04d}.spawn.json', run)
             for name, pipe in (('stdout', child.stdout), ('stderr', child.stderr)):
                 os.set_blocking(pipe.fileno(), False)
                 selector.register(pipe, selectors.EVENT_READ, name)
+            self.document(f'tools/{number:04d}.spawn.json', run)
             deadline = min(started + 5, self.deadline - 3)
             while selector.get_map():
                 if time.monotonic() >= deadline:
                     raise Incomplete('metadata deadline')
-                for key, _mask in selector.select(min(0.05, max(0, deadline - time.monotonic()))):
-                    name = key.data
-                    chunk = os.read(key.fileobj.fileno(), 65536)
-                    if not chunk:
-                        selector.unregister(key.fileobj)
-                        continue
-                    raw = run['streams'][name]
-                    cap = 2097152 if name == 'stdout' else 262144
-                    available = min(cap - raw['size'], 33554432 - self.tool_bytes,
-                                    self.total_bytes - self.payload_bytes)
-                    kept = chunk[:max(0, available)]
-                    stream, digest = streams[name]
-                    stream.write(kept)
-                    digest.update(kept)
-                    raw['size'] += len(kept)
-                    self.tool_bytes += len(kept)
-                    self.payload_bytes += len(kept)
-                    raw['partial_sha256'] = digest.hexdigest()
-                    if len(kept) != len(chunk):
-                        raise Incomplete('metadata output cap')
+                drain(min(0.05, max(0, deadline - time.monotonic())))
             while os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is None:
                 if time.monotonic() >= deadline:
                     raise Incomplete('metadata exit deadline')
@@ -486,6 +495,16 @@ class Census:
         except BaseException as failure:
             error = failure
         finally:
+            run['cleanup_errors'] = []
+
+            def cleanup_drain(wait):
+                try:
+                    drain(wait, cleanup=True)
+                except BaseException as failure:
+                    run['cleanup_errors'].append(str(failure))
+                    for key in list(selector.get_map().values()):
+                        selector.unregister(key.fileobj)
+
             if child is not None:
                 cleanup_end = min(time.monotonic() + 3, self.deadline)
                 for signum in (signal.SIGTERM, signal.SIGKILL):
@@ -496,7 +515,7 @@ class Census:
                     if signum == signal.SIGTERM and error is not None:
                         grace = min(time.monotonic() + 1, cleanup_end)
                         while time.monotonic() < grace:
-                            time.sleep(min(0.02, grace - time.monotonic()))
+                            cleanup_drain(min(0.02, max(0, grace - time.monotonic())))
                 while time.monotonic() < cleanup_end:
                     pid, status, usage = os.wait4(child.pid, os.WNOHANG)
                     if pid == child.pid:
@@ -505,7 +524,11 @@ class Census:
                         child.returncode = os.waitstatus_to_exitcode(status)
                         run.update(reaped=True, returncode=child.returncode)
                         break
-                    time.sleep(0.01)
+                    cleanup_drain(min(0.01, max(0, cleanup_end - time.monotonic())))
+                while selector.get_map() and time.monotonic() < cleanup_end:
+                    cleanup_drain(min(0.02, max(0, cleanup_end - time.monotonic())))
+                run['pipes_drained'] = (not selector.get_map() and not run['cleanup_errors'] and
+                                        not run.get('cleanup_output_truncated', False))
                 try:
                     os.killpg(child.pid, 0)
                 except ProcessLookupError:
@@ -520,10 +543,17 @@ class Census:
             run['elapsed_seconds'] = time.monotonic() - started
             run['error'] = None if error is None else str(error)
             self.document(f'tools/{number:04d}.closed.json', run)
-        self.capture(executable, 'tool-after-exec', eligible=True)
-        if self.regular_row(executable)['raw'] != tool:
-            raise Incomplete('executed metadata tool changed')
-        if error is not None or not run['reaped'] or not run['group_closed'] or run['returncode'] != 0:
+        try:
+            self.capture(executable, 'tool-after-exec', eligible=True)
+            if self.regular_row(executable)['raw'] != tool:
+                raise Incomplete('executed metadata tool changed')
+        except BaseException as failure:
+            if error is None:
+                error = failure
+            else:
+                run['tool_after_error'] = str(failure)
+        if (error is not None or run['cleanup_errors'] or not run.get('pipes_drained') or
+                not run['reaped'] or not run['group_closed'] or run['returncode'] != 0):
             raise Incomplete('metadata failed or positive child closure unavailable') from error
         for raw in run['streams'].values():
             raw['sha256'] = raw.pop('partial_sha256')

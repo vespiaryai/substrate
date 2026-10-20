@@ -207,6 +207,49 @@ class ArchiveTest(unittest.TestCase):
                          '--debug-dump=no-follow-links', '--debug-dump=do-not-use-debuginfod'])
         self.assertEqual(run['argv'][7], str(self.output / owner.regular_row(str(subject))['raw']['name']))
 
+    def test_metadata_cancellation_drains_term_handler_prefixes(self):
+        body = ('import os, signal, time\n'
+                'def stop(*args):\n'
+                ' os.write(1, b"term-stdout"); os.write(2, b"term-stderr"); raise SystemExit(0)\n'
+                'signal.signal(signal.SIGTERM, stop)\n'
+                'os.write(1, b"ready")\n'
+                'time.sleep(30)\n')
+        owner, executable, subject = self.metadata_fixture(body)
+        with patch.dict(census_tools.TOOLS, {'readelf': str(executable)}):
+            with self.assertRaises(census_tools.Incomplete):
+                owner.metadata('readelf', [str(subject)])
+        run = owner.runs[0]
+        for name, expected in (('stdout', b'readyterm-stdout'), ('stderr', b'term-stderr')):
+            raw = run['streams'][name]
+            self.assertEqual((self.output / raw['name']).read_bytes(), expected)
+            self.assertEqual(raw['partial_sha256'], hashlib.sha256(expected).hexdigest())
+        self.assertEqual(run['error'], 'metadata deadline')
+        self.assertEqual(run['cleanup_errors'], [])
+        self.assertTrue(run['pipes_drained'])
+        self.assertTrue(run['reaped'])
+        self.assertTrue(run['group_closed'])
+        self.assertFalse(run['complete'])
+
+    def test_metadata_cancellation_bounds_term_output(self):
+        body = ('import os, signal, time\n'
+                'def stop(*args):\n'
+                ' os.write(2, b"z" * 262145)\n'
+                'signal.signal(signal.SIGTERM, stop)\n'
+                'os.write(1, b"ready")\n'
+                'time.sleep(30)\n')
+        owner, executable, subject = self.metadata_fixture(body)
+        with patch.dict(census_tools.TOOLS, {'readelf': str(executable)}):
+            with self.assertRaises(census_tools.Incomplete):
+                owner.metadata('readelf', [str(subject)])
+        run = owner.runs[0]
+        raw = run['streams']['stderr']
+        self.assertEqual((self.output / raw['name']).read_bytes(), b'z' * 262144)
+        self.assertEqual(run['error'], 'metadata deadline')
+        self.assertTrue(run['cleanup_output_truncated'])
+        self.assertTrue(run['reaped'])
+        self.assertTrue(run['group_closed'])
+        self.assertFalse(run['complete'])
+
     def test_consumer_charges_count_overlap_and_hex_without_claiming_fit(self):
         paths = [self.inputs / name for name in ('a', 'b', 'profile', 'manifest')]
         for path, body in zip(paths, (b'abcd', b'xyz', b'p' * 10, b'm' * 20)):
