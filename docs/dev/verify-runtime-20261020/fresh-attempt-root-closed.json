@@ -1,0 +1,133 @@
+{
+  "status": "closed-failed-owned-namespace-read-denied-after-root-owned-stop",
+  "recordedAt": "2026-10-20T07:05:19.096324+00:00",
+  "source": "a8fb2dadb9aa857471d96778009c868aa42a5c2f",
+  "nonce": "18ec13b3d43234b8ab4f79fbc49e0c1d",
+  "fixedIntent": "/home/zack/.codex/orchestrate/vespiary-goal330/reviews/daemon-only-pending-18ec13b3d43234b8ab4f79fbc49e0c1d.json",
+  "fixedIntentSHA256": "247347a24e44e61515bc14b9012d09d2936c82a59075612f3b9295f084286d3a",
+  "actualStableInputPaths": 13725,
+  "actualUniqueSourceNativeBlobsVerified": 13046,
+  "preflight": 0,
+  "bootstrap": 1,
+  "failure": "PermissionError13 at /proc/915847/ns/mnt, no retry or alternate access",
+  "partialInfo": {
+    "ID": "81cceefa-a1de-425b-af9b-de2640229d7e",
+    "Containers": 0,
+    "ContainersRunning": 0,
+    "Images": 0,
+    "Driver": "overlayfs",
+    "SecurityOptions": [
+      "name=seccomp,profile=builtin",
+      "name=rootless",
+      "name=cgroupns"
+    ],
+    "DockerRootDir": "/home/zack/.local/share/vesverify18ec13b3d43234b8ab4f79fbc49e0c1d/data",
+    "CgroupDriver": "systemd",
+    "CgroupVersion": "2"
+  },
+  "partialInfoSHA256": "dda0390875aaeb6f864a7289b904c94b7ee0453b86a2ce330c80d521c151fb8a",
+  "rootStopJobs": [
+    {
+      "time": "2026-10-20T07:02:58.911256+00:00",
+      "stage": "exact-stop-job-completed",
+      "name": "vesverify18ec13b3d43234b8ab4f79fbc49e0c1d-info.service",
+      "invocation": "65fe4d9fd4004b7e9b97d6b36824b486",
+      "job": "/org/freedesktop/systemd1/job/5452"
+    },
+    {
+      "time": "2026-10-20T07:02:58.926045+00:00",
+      "stage": "exact-stop-job-completed",
+      "name": "vesverify18ec13b3d43234b8ab4f79fbc49e0c1d-daemon.service",
+      "invocation": "9d04bb919de34b549b84af45b33abb39",
+      "job": "/org/freedesktop/systemd1/job/5453"
+    },
+    {
+      "time": "2026-10-20T07:02:58.930420+00:00",
+      "stage": "exact-stop-job-completed",
+      "name": "vesverify18ec13b3d43234b8ab4f79fbc49e0c1d.slice",
+      "invocation": "6cb971176f704f508b6b18b6c4a0b1ff",
+      "job": "/org/freedesktop/systemd1/job/5454"
+    }
+  ],
+  "currentNative": [
+    {
+      "name": "vesverify18ec13b3d43234b8ab4f79fbc49e0c1d.slice",
+      "NoSuchUnit": true
+    },
+    {
+      "name": "vesverify18ec13b3d43234b8ab4f79fbc49e0c1d-daemon.service",
+      "NoSuchUnit": true
+    },
+    {
+      "name": "vesverify18ec13b3d43234b8ab4f79fbc49e0c1d-info.service",
+      "NoSuchUnit": true
+    }
+  ],
+  "ownedCgroupsAbsent": [
+    "/user.slice/user-1000.slice/user@1000.service/vesverify18ec13b3d43234b8ab4f79fbc49e0c1d.slice",
+    "/user.slice/user-1000.slice/user@1000.service/vesverify18ec13b3d43234b8ab4f79fbc49e0c1d.slice/vesverify18ec13b3d43234b8ab4f79fbc49e0c1d-daemon.service"
+  ],
+  "rootObservedPIDStartsGone": [
+    [
+      915796,
+      "3088753"
+    ],
+    [
+      915797,
+      "3088763"
+    ],
+    [
+      915809,
+      "3088768"
+    ],
+    [
+      915837,
+      "3088778"
+    ],
+    [
+      915847,
+      "3088782"
+    ],
+    [
+      915849,
+      "3088782"
+    ],
+    [
+      915880,
+      "3088788"
+    ],
+    [
+      915921,
+      "3088798"
+    ]
+  ],
+  "rootObservedGroupsGone": [
+    915792,
+    915797,
+    915847,
+    915880,
+    915921
+  ],
+  "rootLiveSamples": 1460,
+  "rootActualLockRefusals": 8,
+  "privateSocketsAbsent": [
+    "/run/user/1000/vesverify18ec13b3d43234b8ab4f79fbc49e0c1d/docker.sock",
+    "/run/user/1000/vesverify18ec13b3d43234b8ab4f79fbc49e0c1d/exec/containerd/containerd.sock",
+    "/run/user/1000/vesverify18ec13b3d43234b8ab4f79fbc49e0c1d/exec/containerd/containerd-debug.sock",
+    "/run/user/1000/vesverify18ec13b3d43234b8ab4f79fbc49e0c1d/rootlesskit/api.sock"
+  ],
+  "observerMountsContainPrivatePaths": false,
+  "actualLock": {
+    "device": 54,
+    "inode": 4045,
+    "acquiredUnlockedClosed": true
+  },
+  "retainedPrivatePaths": [
+    "/home/zack/.local/share/vesverify18ec13b3d43234b8ab4f79fbc49e0c1d",
+    "/run/user/1000/vesverify18ec13b3d43234b8ab4f79fbc49e0c1d"
+  ],
+  "acceptance": false,
+  "limit": "Info native job/output and zero objects worked. Namespace actor collection and helper normal teardown failed; root exact-unit recovery is not helper qualification. No full namespace identity/reference census or universal outside-holder absence. Consumed new nonce/intent/P/R must never rerun. No Go, installer, image/container or Goal proof.",
+  "fixedRootCompanion": "/home/zack/.codex/orchestrate/vespiary-goal330/reviews/daemon-only-root-closed-18ec13b3d43234b8ab4f79fbc49e0c1d.json",
+  "fixedRootCompanionSHA256": "49e84adc68ce5f9c884a30f991d9de6cade7f11ae4fa32af8ddf80b3df518370"
+}
