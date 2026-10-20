@@ -25,7 +25,7 @@ from unittest.mock import patch
 
 
 SOURCE = Path(__file__).with_name('census_tools.py')
-FIXTURE = Path('/home/zack/.codex/orchestrate/vespiary-goal330/reviews/native-projection-owner-completion/fixture-owner-complete-01')
+FIXTURE = Path('/home/zack/.codex/orchestrate/vespiary-goal330/reviews/native-projection-manifest-map-fix/fixture-manifest-map-01')
 DECLARATIONS = {'loaded_sources_complete': True, 'module_report_complete': True,
                 'suite_output_bound_declared': True}
 spec = importlib.util.spec_from_file_location('census_tools_fixture', SOURCE)
@@ -783,6 +783,89 @@ Dynamic section at offset 0x100 contains 3 entries:
             owner.serialized_projection(profile, [profile_path], profile_path, manifest_path,
                                         [a], {}, {}, 0, DECLARATIONS)
 
+
+    def test_manifest_path_round_trip_and_all_splitlines_separators(self):
+        ordinary = str(self.inputs / 'ordinary  space\t\u00e9.py')
+        separators = ('\n', '\r', '\r\n', '\v', '\f', '\x1c', '\x1d', '\x1e',
+                      '\x85', '\u2028', '\u2029')
+        bad_paths = [str(self.inputs / ('a' + separator + 'b.py')) for separator in separators]
+        profile_path, manifest_path = [str(self.inputs / name) for name in ('profile', 'manifest')]
+        for path in [ordinary, *bad_paths, profile_path, manifest_path]:
+            Path(path).write_bytes(b'fixture')
+        owner = self.owner()
+        for path in [ordinary, *bad_paths, profile_path, manifest_path]:
+            owner.capture(path, 'manifest-boundary-fixture')
+        digest = hashlib.sha256(b'fixture').hexdigest()
+        profile = {'application_enabled': False, 'import_inputs_reviewed': False,
+                   'offline_reviewed': False, 'operations': {'holder': False, 'finite': False, 'recheck': False},
+                   'stdlib_search': [], 'files': {path: digest for path in bad_paths},
+                   'membership': {}, 'required_absences': []}
+        projection = owner.serialized_projection(profile, [ordinary], profile_path, manifest_path,
+                                                 [], {}, {}, 0, DECLARATIONS)
+        expected_manifest = (digest + '  ' + ordinary + '\n').encode('utf-8')
+        self.assertEqual(projection['manifest_hex'], expected_manifest.hex())
+        self.assertEqual([line.split('  ', 1) for line in expected_manifest.decode().splitlines()],
+                         [[digest, ordinary]])
+        self.assertEqual(set(projection['snapshot']['files']),
+                         {ordinary, *bad_paths, profile_path, manifest_path})
+        for path in bad_paths:
+            with self.subTest(path=path):
+                with self.assertRaisesRegex(census_tools.Incomplete,
+                                            '^source manifest path contains a line separator$'):
+                    owner.serialized_projection(profile, [path], profile_path, manifest_path,
+                                                [], {}, {}, 0, DECLARATIONS)
+
+    def test_projected_snapshot_complete_independent_map(self):
+        real = self.inputs / 'real'
+        real.mkdir()
+        source = real / 'source.py'
+        source.write_bytes(b'snapshot-body')
+        (real / 'resource').write_bytes(b'unselected resource')
+        alias = self.inputs / 'alias.py'
+        alias.symlink_to('real/source.py')
+        membership = self.inputs / 'membership'
+        membership.symlink_to('real')
+        missing = self.inputs / 'missing' / 'child' / 'grandchild'
+        profile_path, manifest_path = [str(self.inputs / name) for name in ('profile', 'manifest')]
+        Path(profile_path).write_bytes(b'old profile')
+        Path(manifest_path).write_bytes(b'old manifest')
+        owner = self.owner()
+        for path in (alias, membership, missing, Path(profile_path), Path(manifest_path)):
+            owner.capture(str(path), 'snapshot-map-fixture')
+        digest = hashlib.sha256(b'snapshot-body').hexdigest()
+        profile = {'application_enabled': False, 'import_inputs_reviewed': False,
+                   'offline_reviewed': False, 'operations': {'holder': False, 'finite': False, 'recheck': False},
+                   'stdlib_search': [], 'files': {str(alias): digest},
+                   'membership': {str(membership): ['resource', 'source.py']},
+                   'required_absences': [str(missing)]}
+        profile_body = json.dumps(profile, sort_keys=True).encode('utf-8')
+        manifest_body = (digest + '  ' + str(alias) + '\n').encode('utf-8')
+        expected = {'files': {}, 'links': {},
+                    'membership': {str(membership): ['resource', 'source.py']},
+                    'absences': {str(missing): True}}
+        for path, body in ((str(alias), b'snapshot-body'),
+                           (profile_path, profile_body), (manifest_path, manifest_body)):
+            metadata = Path(path).stat()
+            expected['files'][path] = {'sha256': hashlib.sha256(body).hexdigest(), 'size': len(body),
+                'mode': metadata.st_mode, 'uid': metadata.st_uid, 'gid': metadata.st_gid,
+                'device': metadata.st_dev, 'inode': metadata.st_ino, 'mtime_ns': metadata.st_mtime_ns}
+        for path, target in ((alias, 'real/source.py'), (membership, 'real')):
+            metadata = path.lstat()
+            self.assertEqual(os.readlink(path), target)
+            expected['links'][str(path)] = {'target': target, 'mode': metadata.st_mode,
+                'uid': metadata.st_uid, 'gid': metadata.st_gid, 'device': metadata.st_dev,
+                'inode': metadata.st_ino, 'mtime_ns': metadata.st_mtime_ns}
+        expected_body = json.dumps(expected, sort_keys=True).encode('utf-8')
+        projection = owner.serialized_projection(profile, [str(alias)], profile_path, manifest_path,
+                                                 [], {}, {}, 0, DECLARATIONS)
+        self.assertEqual(projection['snapshot'], expected)
+        self.assertEqual(census_tools.consumer_json(projection['snapshot']), expected_body)
+        self.assertEqual(projection['snapshot_map_serialized_bytes'], len(expected_body))
+        self.assertEqual(projection['offline']['two_snapshot_map_bytes'], 2 * len(expected_body))
+        self.assertEqual(projection['manifest_hex'], manifest_body.hex())
+        self.assertEqual(projection['selection'], 'unobserved')
+        self.assertEqual(projection['authorities'], {'application': False, 'import': False, 'offline': False,
+                         'holder': False, 'finite': False, 'recheck': False, 'native': False})
 
     def test_descendant_absence_and_all_absent_interpreter_roots(self):
         owner = self.owner()

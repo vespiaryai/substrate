@@ -1091,6 +1091,8 @@ class Census:
         serialized_size(modules, JSON_BYTES)
         profile_size = serialized_size(profile, JSON_BYTES)
         profile_body = consumer_json(profile)
+        if any(path.splitlines() != [path] for path in source_paths):
+            raise Incomplete('source manifest path contains a line separator')
         manifest_body = ''.join(self.regular_row(path)['raw']['sha256'] + '  ' + path + '\n'
                                 for path in source_paths).encode('utf-8')
         if len(manifest_body) > JSON_BYTES:

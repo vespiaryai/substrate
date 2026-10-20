@@ -58,6 +58,9 @@ endpoints, linked ancestors, shared inodes and any observed hard-link or symlink
 alias of either document refuse. This prevents indirect document self-reference.
 Duplicate source-manifest and loaded-source declarations refuse. Generated document
 metadata remains hypothetical at predecessor identities until later publication.
+Manifest serialization refuses every path separator recognized by str.splitlines.
+Ordinary spaces, tabs and Unicode filenames round-trip through the consumers'
+first-two-space split. Corpus filenames outside manifest rows retain their bytes.
 
 `projection_documents` computes exact compact acquisition JSON bytes, including
 all already written intent, progress and tool records. It charges census.json,
@@ -97,11 +100,17 @@ operation require separate proof. No whole-goal completion follows.
 ## Proposed finite fixture proof
 
 The fresh exclusive fixture directory is
-/home/zack/.codex/orchestrate/vespiary-goal330/reviews/native-projection-owner-completion/fixture-owner-complete-01.
+/home/zack/.codex/orchestrate/vespiary-goal330/reviews/native-projection-manifest-map-fix/fixture-manifest-map-01.
 An existing directory refuses. No previous receipt or fixture path is reused.
-The suite retains the original thirty cases, migrates the old charge call without
-removing its assertions, and adds literal absence, ancestor-link, metadata,
-duplicate declaration, interpreter, document-alias and combined producer tests.
+The suite proposes 41 cases. All 39 predecessor cases and their assertions remain.
+The manifest boundary case covers LF, CR, CRLF, VT, FF, FS, GS, RS, NEL, LS and PS,
+alongside a positive path containing spaces, a tab and Unicode. Those separator
+filenames remain valid captured profile inputs when they are not manifest rows.
+A complete independent snapshot-map oracle covers a file link, linked-directory
+membership and a descendant absence. Expected metadata comes directly from fixture
+stat, lstat and readlink calls, and expected bodies come from literal fixture bytes
+and input documents. It checks the whole map, exact spaced sorted JSON bytes and
+both snapshot-map charges without deriving expected values from the returned map.
 The real eight MiB boundary fixture authors an exact cap and one-byte overflow.
 It does not capture host inputs. No fixture has run at these bytes.
 
