@@ -1,5 +1,8 @@
 {
   "application_enabled": false,
+  "import_inputs_reviewed": false,
+  "offline_reviewed": false,
+  "operations": {"holder": false, "finite": false, "recheck": false},
   "files": {
     "/etc/ld.so.cache": "c9e05265256c5380b87f3b66e184644c21d56558242d1a8c0c6324d3e92030dc",
     "/etc/ld.so.conf": "239c865e4c0746a01f82b03d38d620853bab2a2ba8e81d6f5606c503e0ea379f",
@@ -359,12 +362,16 @@
     "/etc/ld.so.preload"
   ],
   "status": "source-unproved",
-  "stdlib_search": [],
+  "stdlib_search": ["/usr/lib64/python314.zip", "/usr/lib64/python3.14", "/usr/lib64/python3.14/lib-dynload"],
   "unproved": [
-    "actual isolated no-site stdlib/zip/dynamic search list has not been sampled",
+    "search list observed by root interpreter-only metadata at reviews/native-python-interpreter-metadata.json, not a native loading pass",
     "complete interpreter stdlib/extension and transitive ELF dependency map is absent",
     "GI repository default typelib/library/config search and locale closure remain unproved",
     "exact source/compiled/typelib loading with site and .pth disabled has not executed",
-    "binary symlink metadata and every fallback/search-directory membership need independent input review"
+    "binary symlink metadata and every fallback/search-directory membership need independent input review",
+    "pkgutil package portions and gi.pkg presence/absence, PYGI_OVERRIDES_PATH and overrides remain incomplete",
+    "GI companion namespaces, typelibs and default fallback paths remain incomplete",
+    "ELF interpreter, recursively resolved DT_NEEDED, RPATH/RUNPATH, loader/cache/conf.d/search/preload/environment closure is absent",
+    "actual dockerd-rootless shell/helpers, RootlessKit UID/GID helpers and optimized pasta launcher bytes/search/absence closure is absent"
   ]
 }

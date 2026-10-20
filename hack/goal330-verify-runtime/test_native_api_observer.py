@@ -14,8 +14,12 @@
 
 import dataclasses
 import json
+import os
 from pathlib import Path
 import tempfile
+import signal
+import subprocess
+import time
 import unittest
 from unittest.mock import Mock, PropertyMock, patch
 
@@ -24,6 +28,8 @@ import dbus
 import native_api_observer as native
 import native_python_entry as entry
 from systemd_job import owned_job
+
+native.setup_native()
 
 
 class NativeObserverTest(unittest.TestCase):
@@ -138,6 +144,8 @@ class NativeObserverTest(unittest.TestCase):
                 return self.daemon
             if unit == self.info.unit:
                 (self.attempt.p / "info.json").write_text(json.dumps(self.docker_value()))
+                observation.clients.append({"join_error": None, "buffers": {
+                    "info.json": {"raw": json.dumps(self.docker_value()).encode().hex()}}})
                 return self.info
             if unit == self.api.unit:
                 value = self.api_value()
@@ -150,6 +158,9 @@ class NativeObserverTest(unittest.TestCase):
                     body = b"x" * (native.MAX_RESPONSE + 1)
                 (self.attempt.p / "rootlesskit-info.json").write_bytes(body)
                 (self.attempt.p / "rootlesskit-status.json").write_bytes(b"302" if fault == "redirect" else b"200")
+                observation.clients.append({"join_error": None, "buffers": {
+                    "rootlesskit-info.json": {"raw": body.hex()},
+                    "rootlesskit-status.json": {"raw": (b"302" if fault == "redirect" else b"200").hex()}}})
                 if fault == "pid-reuse":
                     self.write_process(dataclasses.replace(self.child, starttime=9000))
                 if fault == "source":
@@ -284,12 +295,12 @@ class NativeObserverTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "escaped"):
             native.process_identity(self.child.pid, self.child)
         self.write_process(self.child)
-        original = Path.read_bytes
-        def denied(path):
+        original = native.read_bounded
+        def denied(path, limit):
             if path == self.proc / str(self.child.pid) / "cmdline":
                 raise PermissionError("required ordinary metadata")
-            return original(path)
-        with patch.object(Path, "read_bytes", denied), self.assertRaises(PermissionError):
+            return original(path, limit)
+        with patch.object(native, "read_bounded", denied), self.assertRaises(PermissionError):
             native.process_identity(self.child.pid, self.child)
         self.write_process(dataclasses.replace(self.child, starttime=2222))
         self.assertNotEqual(native.process_identity(self.child.pid, self.child), self.child)
@@ -355,6 +366,8 @@ class NativeObserverTest(unittest.TestCase):
         api = dict(self.attempt.unit_properties(self.api.unit))
         self.assertEqual(api["Slice"], self.parent.unit)
         self.assertFalse(api["Delegate"])
+        self.assertEqual(int(api["LimitFSIZE"]), 65536)
+        self.assertEqual(int(api["LimitFSIZESoft"]), 65536)
         argv = self.attempt.api_argv()
         self.assertEqual(argv.count("http://rootlesskit/v1/info"), 1)
         for option, value in (("--max-time", "5"), ("--max-filesize", "65536"),
@@ -480,13 +493,26 @@ class CustodyAndEntryTest(unittest.TestCase):
         self.attempt.p.mkdir()
         (self.attempt.p / "docker-entry.json").write_text(json.dumps(witness))
         (self.attempt.p / "docker-plan.json").write_text(json.dumps({"cgroup": witness["cgroup"]}))
+        raw = b'{"ID":"fixture"}\n'
+        (self.attempt.p / "info.json").write_bytes(raw)
+        (self.attempt.p / "info.stderr").write_bytes(b"owned fixture stderr\n")
         service = {"ExecMainPID": 201, "ExecMainCode": 1, "ExecMainStatus": 0, "Result": "success"}
         with patch.object(native, "properties", return_value=service), patch.object(native.Attempt, "identity", return_value=self.info):
             actor = self.attempt.completed_client(self.info)
             self.assertEqual((actor.pid, actor.starttime, actor.cgroup), (201, 202, witness["cgroup"]))
+            evidence = self.attempt.client_output(self.info)
+            self.assertEqual(evidence["unit"]["job"], self.info.job)
+            self.assertEqual(evidence["witness"], witness)
+            self.assertEqual(evidence["completion"], service)
+            self.assertEqual(evidence["buffers"]["info.json"], {
+                "size": len(raw), "sha256": native.hashlib.sha256(raw).hexdigest(), "raw": raw.hex()})
             for key, value in (("ExecMainPID", 999), ("ExecMainCode", 2), ("ExecMainStatus", 1), ("Result", "failed")):
                 with self.subTest(key=key), patch.object(native, "properties", return_value={**service, key: value}), self.assertRaisesRegex(RuntimeError, "completion"):
                     self.attempt.completed_client(self.info)
+                with patch.object(native, "properties", return_value={**service, key: value}):
+                    failed = self.attempt.client_output(self.info)
+                    self.assertIsNotNone(failed["join_error"])
+                    self.assertEqual(failed["buffers"]["info.json"]["raw"], raw.hex())
 
 
 class JobSetupFinalizerTest(unittest.TestCase):
@@ -527,6 +553,7 @@ class NativeInputProfileTest(unittest.TestCase):
             source.write_bytes(b"fixed native input")
             profile = root / "profile.json"
             value = {"application_enabled": False, "stdlib_search": list(entry.sys.path),
+                     "operations": {"holder": True}, "import_inputs_reviewed": True,
                      "membership": {}, "required_absences": [str(root / "shadow")],
                      "files": native.digest_map((source,))}
             profile.write_text(json.dumps(value))
@@ -536,6 +563,7 @@ class NativeInputProfileTest(unittest.TestCase):
             with patch.object(entry, "PROFILE", profile), patch.object(entry.sys, "flags", flags), patch.object(entry.sys, "modules", {}):
                 with self.assertRaisesRegex(RuntimeError, "source-unproved"):
                     entry.checked_profile()
+                self.assertFalse(entry.checked_profile("import-only")["application_enabled"])
                 value["application_enabled"] = True
                 profile.write_text(json.dumps(value))
                 self.assertEqual(entry.checked_profile()["files"], native.digest_map((source,)))
@@ -546,6 +574,138 @@ class NativeInputProfileTest(unittest.TestCase):
                 (root / "shadow").write_bytes(b"unreviewed")
                 with self.assertRaisesRegex(RuntimeError, "absence"):
                     entry.checked_profile()
+
+    def test_import_only_does_not_construct_attempt_or_call_operations(self):
+        with patch.object(entry, "checked_profile", return_value={"application_enabled": False}), patch.object(
+            entry, "load_owners") as load, patch.object(entry.sys, "stdout") as output:
+            entry.import_only()
+            load.assert_called_once_with({"application_enabled": False}, True)
+            load.return_value.Attempt.assert_not_called()
+            output.buffer.write.assert_called_once()
+
+
+class OwnedHolderTest(unittest.TestCase):
+    def exercise(self, case, status=None, exitcode=None):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "source").write_bytes(b"fixed fixture source")
+            fixture = Path(__file__).resolve().with_name("native_holder_fixture.py")
+            with (root / "stdout").open("wb") as stdout, (root / "stderr").open("wb") as stderr:
+                holder = subprocess.Popen(["/usr/bin/python3", "-I", "-S", "-B", str(fixture),
+                                           "holder", case, str(root)], close_fds=True,
+                                          env={"PATH": "/usr/bin:/bin", "LC_ALL": "C", "LANG": "C"},
+                                          stdout=stdout, stderr=stderr)
+                try:
+                    primary = root / "daemon-only-pending-00000000000000000000000000000001.json"
+                    target = root / "holder-return.json" if status else primary.with_suffix(".holder-unknown.json")
+                    if case == "receipt-error":
+                        target = root / "receipt-error-ready"
+                    deadline = time.monotonic() + 18
+                    while not target.exists():
+                        if holder.poll() is not None or time.monotonic() > deadline:
+                            self.fail("holder fixture did not reach expected checkpoint " + (root / "stderr").read_text())
+                        time.sleep(0.01)
+                    lock = os.open(root / "canonical-lock", os.O_RDWR | os.O_CLOEXEC)
+                    try:
+                        if status:
+                            self.assertEqual(holder.wait(timeout=5), 0)
+                            self.assertEqual(json.loads(target.read_bytes()), {"status": status})
+                            closed = json.loads(primary.with_suffix(".holder-closed.json").read_bytes())
+                            self.assertEqual(closed["finite_exit"]["returncode"], exitcode)
+                            self.assertEqual(closed["recheck_exit"]["returncode"], 0)
+                            self.assertEqual(closed["status"], status)
+                            native.fcntl.flock(lock, native.fcntl.LOCK_EX | native.fcntl.LOCK_NB)
+                            self.assertEqual([os.fstat(lock).st_dev, os.fstat(lock).st_ino], closed["lock"])
+                            native.fcntl.flock(lock, native.fcntl.LOCK_UN)
+                        else:
+                            self.assertIsNone(holder.poll())
+                            with self.assertRaises(BlockingIOError):
+                                native.fcntl.flock(lock, native.fcntl.LOCK_EX | native.fcntl.LOCK_NB)
+                            holder.send_signal(signal.SIGTERM)
+                            with self.assertRaises(subprocess.TimeoutExpired):
+                                holder.wait(timeout=0.1)
+                            with self.assertRaises(BlockingIOError):
+                                native.fcntl.flock(lock, native.fcntl.LOCK_EX | native.fcntl.LOCK_NB)
+                        if case != "receipt-error":
+                            contention = json.loads((root / "finite-contention.json").read_bytes())
+                            self.assertFalse(contention["inherited"])
+                            pending = json.loads(primary.read_bytes())
+                            self.assertEqual(contention["inode"], pending["lock"])
+                            finite_exit = json.loads(primary.with_suffix(".finite-exit.json").read_bytes())
+                            if case == "timeout":
+                                self.assertTrue(finite_exit["timed_out"])
+                                self.assertLess(finite_exit["returncode"], 0)
+                            if case == "recheck-timeout":
+                                recheck_exit = json.loads(primary.with_suffix(".recheck-exit.json").read_bytes())
+                                self.assertTrue(recheck_exit["timed_out"])
+                                self.assertLess(recheck_exit["returncode"], 0)
+                    finally:
+                        os.close(lock)
+                finally:
+                    if holder.poll() is None:
+                        holder.kill()
+                    holder.wait(timeout=5)
+
+    def test_clean_closure_releases_actual_inode(self):
+        self.exercise("clean", "qualified-and-closed", 0)
+
+    def test_failed_qualification_releases_after_closure(self):
+        self.exercise("failed", "failed-but-closed", 0)
+
+    def test_nonzero_after_result_fails_qualification(self):
+        self.exercise("nonzero", "failed-but-closed", 17)
+
+    def test_signal_after_result_fails_qualification(self):
+        self.exercise("signal", "failed-but-closed", -signal.SIGKILL)
+
+    def test_missing_result_retains_actual_holder(self):
+        self.exercise("missing")
+
+    def test_malformed_result_retains_actual_holder(self):
+        self.exercise("malformed")
+
+    def test_oversized_result_retains_actual_holder(self):
+        self.exercise("oversized")
+
+    def test_source_drift_fails_but_closes(self):
+        self.exercise("source-drift", "failed-but-closed", 0)
+
+    def test_receipt_error_retains_actual_holder(self):
+        self.exercise("receipt-error")
+
+    def test_nonresponsive_finite_child_retains_holder(self):
+        self.exercise("timeout")
+
+    def test_nonresponsive_recheck_retains_holder_recovery(self):
+        self.exercise("recheck-timeout")
+
+    def test_nonzero_recheck_after_result_retains_holder(self):
+        self.exercise("recheck-nonzero")
+
+    def test_regular_read_and_result_writer_enforce_limits(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "oversized"
+            with path.open("wb") as stream:
+                stream.truncate(native.MAX_RESULT + 1)
+            with self.assertRaisesRegex(RuntimeError, "bounded"):
+                native.read_bounded(path, native.MAX_RESULT)
+            destination = Path(directory) / "refused"
+            with self.assertRaisesRegex(RuntimeError, "bound"):
+                native.write_evidence(destination, b"x" * (native.MAX_RESULT + 1))
+            self.assertFalse(destination.exists())
+
+    def test_actual_producer_stops_at_file_limit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "native-output"
+            code = ('import os,resource,sys\n'
+                    'resource.setrlimit(resource.RLIMIT_FSIZE,(65536,65536))\n'
+                    'fd=os.open(sys.argv[1],os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)\n'
+                    'while True: os.write(fd,b"x"*4096)\n')
+            result = subprocess.run(["/usr/bin/python3", "-I", "-S", "-B", "-c", code, str(output)],
+                                    close_fds=True, timeout=5, check=False, capture_output=True,
+                                    env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"})
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(output.stat().st_size, 65536)
 
 
 if __name__ == "__main__":

@@ -17,7 +17,21 @@ import json
 import os
 from pathlib import Path
 import re
+import resource
+import stat
 import sys
+
+
+def read_bounded(path, limit):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as stream:
+        metadata = os.fstat(stream.fileno())
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > limit:
+            raise RuntimeError("client input exceeds bound or is not regular")
+        body = stream.read(limit + 1)
+    if len(body) > limit:
+        raise RuntimeError("client input exceeds bound")
+    return body
 
 
 def client_argv(kind, persistent, runtime):
@@ -35,10 +49,7 @@ def client_argv(kind, persistent, runtime):
 
 
 def read_witness(path):
-    with path.open("rb") as stream:
-        body = stream.read(16385)
-    if len(body) > 16384:
-        raise RuntimeError("client witness exceeds bound")
+    body = read_bounded(path, 16384)
     value = json.loads(body)
     if (any(type(value.get(key)) is not int or value[key] <= 0
             for key in ("pid", "starttime", "ppid", "pgrp"))
@@ -55,20 +66,18 @@ def client_entry(kind, nonce):
         raise RuntimeError("client identity is not a fresh root assignment")
     persistent = Path(f"/home/zack/.local/share/vesverify{nonce}")
     runtime = Path(f"/run/user/1000/vesverify{nonce}")
-    with (persistent / f"{kind}-plan.json").open("rb") as stream:
-        body = stream.read(16385)
-    if len(body) > 16384:
-        raise RuntimeError("client plan exceeds bound")
+    resource.setrlimit(resource.RLIMIT_FSIZE, (65536, 65536))
+    body = read_bounded(persistent / f"{kind}-plan.json", 16384)
     plan = json.loads(body)
-    boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
-    before = Path("/proc/self/stat").read_text().rsplit(")", 1)[1].split()
-    group = Path("/proc/self/cgroup").read_text().strip()
+    boot = read_bounded(Path("/proc/sys/kernel/random/boot_id"), 65536).decode().strip()
+    before = read_bounded(Path("/proc/self/stat"), 65536).decode().rsplit(")", 1)[1].split()
+    group = read_bounded(Path("/proc/self/cgroup"), 65536).decode().strip()
     invocation = os.environ.get("INVOCATION_ID", "")
     entry = str(Path(__file__).resolve())
     if (not sys.flags.isolated or not sys.flags.no_site or not group.startswith("0::")
             or group[3:] != plan["cgroup"] or boot != plan["boot"]
             or not re.fullmatch(r"[0-9a-f]{32}", invocation) or not int(invocation, 16)
-            or plan["entry"] != {entry: hashlib.sha256(Path(entry).read_bytes()).hexdigest()}):
+            or plan["entry"] != {entry: hashlib.sha256(read_bounded(Path(entry), 1048576)).hexdigest()}):
         raise RuntimeError("client pre-exec native placement/input mismatch")
     argv = client_argv(kind, persistent, runtime)
     witness = {"boot": boot, "unit": plan["unit"], "invocation": invocation, "cgroup": group[3:],
@@ -85,8 +94,8 @@ def client_entry(kind, nonce):
         os.fsync(directory)
     finally:
         os.close(directory)
-    after = Path("/proc/self/stat").read_text().rsplit(")", 1)[1].split()
-    if before[19] != after[19] or Path("/proc/self/cgroup").read_text().strip() != group:
+    after = read_bounded(Path("/proc/self/stat"), 65536).decode().rsplit(")", 1)[1].split()
+    if before[19] != after[19] or read_bounded(Path("/proc/self/cgroup"), 65536).decode().strip() != group:
         raise RuntimeError("client changed identity before exec")
     os.execve(argv[0], argv, {"PATH": "/usr/bin:/bin", "HOME": str(persistent / "home"),
                             "DOCKER_CONFIG": str(persistent / "docker-config"), "LC_ALL": "C", "LANG": "C"})
