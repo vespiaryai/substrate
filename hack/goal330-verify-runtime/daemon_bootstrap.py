@@ -42,6 +42,7 @@ MANAGER = "org.freedesktop.systemd1.Manager"
 UNIT = "org.freedesktop.systemd1.Unit"
 SERVICE = "org.freedesktop.systemd1.Service"
 CGROUP = Path("/sys/fs/cgroup")
+PROC = Path("/proc")
 
 
 def present(path):
@@ -68,6 +69,15 @@ class ProcessIdentity:
     cgroup: str
     argv: tuple[str, ...]
     namespaces: tuple[tuple[str, str], ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class DetachedNetns:
+    child: ProcessIdentity
+    path: str
+    device: int
+    inode: int
+    mount: str
 
 
 def daemon_config():
@@ -205,7 +215,7 @@ def bounded_parent(value):
 
 
 def process_identity(pid, parent):
-    root = Path(f"/proc/{pid}")
+    root = PROC / str(pid)
     before = (root / "stat").read_text().rsplit(")", 1)[1].split()
     cgroup = (root / "cgroup").read_text().strip()
     if not cgroup.startswith("0::"):
@@ -219,8 +229,9 @@ def process_identity(pid, parent):
         tuple((name, os.readlink(root / "ns" / name)) for name in ("mnt", "net", "user")),
     )
     after = (root / "stat").read_text().rsplit(")", 1)[1].split()
-    if before[19] != after[19]:
-        raise RuntimeError("PID changed during observation")
+    if (before[19] != after[19]
+            or (root / "cgroup").read_text().strip() != "0::" + cgroup):
+        raise RuntimeError("PID or cgroup changed during observation")
     return result
 
 
@@ -281,13 +292,43 @@ def stop_owned(owned):
                      lambda manager: manager.StopUnit(owned.name, "fail", timeout=5), wait_seconds=20)
 
 
+def stopped_unit(owned):
+    bus = user_bus()
+    try:
+        manager = dbus.Interface(bus.get_object("org.freedesktop.systemd1",
+                                               "/org/freedesktop/systemd1"), MANAGER)
+        if any(str(row[1]) == owned.name for row in manager.ListJobs(timeout=5)):
+            raise RuntimeError("owned unit still has a job")
+        try:
+            unit = properties(bus, owned.name, UNIT)
+        except dbus.DBusException as error:
+            if error.get_dbus_name() != "org.freedesktop.systemd1.NoSuchUnit":
+                raise
+            return {"name": owned.name, "state": "absent"}
+        invocation = bytes(unit["InvocationID"])
+        if (unit["ActiveState"] != "inactive" or unit["SubState"] != "dead"
+                or int(unit["Job"][0]) != 0 or str(unit["Job"][1]) != "/"
+                or invocation not in (owned.invocation, b"", bytes(16))):
+            raise RuntimeError("owned unit lacks exact terminal state")
+        if owned.name != SLICE:
+            service = properties(bus, owned.name, SERVICE)
+            if int(service["MainPID"]) != 0:
+                raise RuntimeError("owned service retains a main PID")
+        return {"name": owned.name, "state": "inactive/dead", "invocation": invocation.hex()}
+    finally:
+        bus.close()
+
+
 def check_stopped_objects(parent, processes):
     path = cgroup_path(parent.cgroup)
     if present(path) and "populated 0" not in (path / "cgroup.events").read_text().splitlines():
         raise RuntimeError("owned cgroup remains populated")
     for process in processes:
-        proc = Path(f"/proc/{process.pid}/stat")
-        if present(proc) and int(proc.read_text().rsplit(")", 1)[1].split()[19]) == process.starttime:
+        try:
+            starttime = int((PROC / str(process.pid) / "stat").read_text().rsplit(")", 1)[1].split()[19])
+        except FileNotFoundError:
+            continue
+        if starttime == process.starttime:
             raise RuntimeError("owned process remains alive")
     for socket in (R / "docker.sock", R / "exec/containerd/containerd.sock",
                    R / "exec/containerd/containerd-debug.sock", R / "rootlesskit/api.sock"):
@@ -301,6 +342,7 @@ def pending_receipt(path, source_identity, owner, boot_id):
         "source": source_identity, "owner": dataclasses.asdict(owner), "boot": boot_id,
         "slice": SLICE, "daemon": DAEMON, "persistent": str(P), "runtime": str(R),
         "endpoint": URI, "proposal_seconds": 300,
+        "reference_scope": "owned-actors-and-references", "outside_holders": "unmeasured",
     }, sort_keys=True).encode() + b"\n"
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "wb") as output:
@@ -361,7 +403,7 @@ def actors(parent):
     details = []
     for _group, pid, _name in pids:
         process = process_identity(int(pid), parent.cgroup)
-        root = Path(f"/proc/{pid}")
+        root = PROC / str(pid)
         descriptors = {entry.name: os.readlink(entry) for entry in (root / "fd").iterdir()}
         sockets = {value[8:-1] for value in descriptors.values() if value.startswith("socket:[")}
         listeners = {}
@@ -380,6 +422,8 @@ def actors(parent):
             "listeners": listeners,
             "fds": descriptors,
         })
+        if process_identity(int(pid), parent.cgroup) != process:
+            raise RuntimeError("owned actor changed during metadata observation")
     if not result:
         raise RuntimeError("no daemon actors observed")
     return result, details
@@ -404,29 +448,58 @@ def host_state():
                       if present(path) else None for path in files}}
 
 
-def namespaces_closed(processes, details, baseline):
-    private = {value for process in processes for _, value in process.namespaces} - set(baseline)
-    uids = {1000, *[row["uid"] for row in details]}
-    for root in Path("/proc").iterdir():
-        if not root.name.isdecimal():
-            continue
-        try:
-            if root.stat().st_uid not in uids:
-                continue
-            if any(os.readlink(root / "ns" / name) in private for name in ("mnt", "net", "user")):
-                raise RuntimeError("an observed private namespace remains referenced")
-            for entry in (root / "fd").iterdir():
-                try:
-                    target = os.readlink(entry)
-                except FileNotFoundError:
-                    continue
-                if target in private:
-                    raise RuntimeError("an observed private namespace descriptor remains open")
-            mounts = (root / "mountinfo").read_text()
-            if str(P) in mounts or str(R) in mounts:
-                raise RuntimeError("private path remains in a live mount namespace")
-        except FileNotFoundError:
-            continue
+def detached_netns(parent, processes):
+    child_pid = int((R / "rootlesskit/child_pid").read_text())
+    child = next((process for process in processes if process.pid == child_pid), None)
+    if child is None or process_identity(child_pid, parent.cgroup) != child:
+        raise RuntimeError("detached netns child is not an exact owned actor")
+    path = R / "rootlesskit/netns"
+    subject = PROC / str(child_pid) / "root" / path.relative_to("/")
+    before = subject.stat()
+    mounts = (PROC / str(child_pid) / "mountinfo").read_text()
+    matches = [line for line in mounts.splitlines() if line.split()[4] == str(path)]
+    if len(matches) != 1:
+        raise RuntimeError("detached netns lacks its exact owned mount")
+    fields = matches[0].split()
+    if (fields[2] != f"{os.major(before.st_dev)}:{os.minor(before.st_dev)}"
+            or fields[3] != f"net:[{before.st_ino}]"
+            or fields[fields.index("-") + 1] != "nsfs"):
+        raise RuntimeError("detached netns stat and nsfs mount identity mismatch")
+    after = subject.stat()
+    if ((before.st_dev, before.st_ino) != (after.st_dev, after.st_ino)
+            or process_identity(child_pid, parent.cgroup) != child):
+        raise RuntimeError("detached netns owner or identity changed")
+    return DetachedNetns(child, str(path), before.st_dev, before.st_ino, matches[0])
+
+
+def owned_references_closed(parent, processes, detached, owner, observer_mounts, boot):
+    check_stopped_objects(parent, processes)
+    if (PROC / "sys/kernel/random/boot_id").read_text().strip() != boot:
+        raise RuntimeError("boot changed during owned closure")
+    if process_identity(owner.pid, owner.cgroup) != owner:
+        raise RuntimeError("outside observer identity changed")
+    mounts = (PROC / "self/mountinfo").read_text()
+    if mounts != observer_mounts or str(P) in mounts or str(R) in mounts:
+        raise RuntimeError("observer mount table changed or retains a private path")
+    if any(line.split()[3] == f"net:[{detached.inode}]"
+           and line.split()[2] == f"{os.major(detached.device)}:{os.minor(detached.device)}"
+           for line in mounts.splitlines()):
+        raise RuntimeError("detached netns was exported into observer mount table")
+    private = {value for process in processes for _, value in process.namespaces}
+    private -= {value for _, value in owner.namespaces}
+    private.add(f"net:[{detached.inode}]")
+    with os.scandir(PROC / "self/fd") as entries:
+        if any(os.readlink(entry.path) in private for entry in entries):
+            raise RuntimeError("observer retains an owned private namespace descriptor")
+    if process_identity(owner.pid, owner.cgroup) != owner:
+        raise RuntimeError("outside observer changed during closure")
+    return {"contract": "owned-actors-and-references", "outside_holders": "unmeasured",
+            "assumption": "unrelated host actors do not acquire or receive namespace references",
+            "observed_namespaces": sorted({value for process in processes
+                                            for _, value in process.namespaces}),
+            "detached_netns": dataclasses.asdict(detached), "observer_mounts_equal": True,
+            "observer_private_namespace_fds": "none",
+            "observer_mounts_after": mounts}
 
 
 def append_observation(path, value):
@@ -450,16 +523,17 @@ def daemon_only():
     deadline = time.monotonic() + 300
     lock = os.open("/tmp/vespiary-heavy-validation.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    baseline = [os.readlink(f"/proc/self/ns/{name}") for name in ("mnt", "net", "user")]
     own_group = Path("/proc/self/cgroup").read_text().strip().removeprefix("0::")
     owner = process_identity(os.getpid(), own_group)
+    boot = (PROC / "sys/kernel/random/boot_id").read_text().strip()
     source = {str(path): hashlib.sha256(path.read_bytes()).hexdigest()
               for path in (Path(__file__).resolve().with_name(name) for name in
                            ("daemon_bootstrap.py", "systemd_job.py", "test_daemon_bootstrap.py",
                             "test_systemd_job.py"))}
-    pending_receipt(RECEIPT, source, owner, Path("/proc/sys/kernel/random/boot_id").read_text().strip())
+    pending_receipt(RECEIPT, source, owner, boot)
     try:
         before = host_state()
+        observer_mounts = (PROC / "self/mountinfo").read_text()
         if os.getuid() != 1000 or os.getgid() != 1000:
             raise RuntimeError("unexpected host user identity")
         for path in (P, R):
@@ -500,6 +574,7 @@ def daemon_only():
             bus.close()
         daemon_id = check_info(json.loads((P / "info.json").read_text()))
         processes, details = actors(parent)
+        detached = detached_netns(parent, processes)
         executables = {Path(process.argv[0]).name for process in processes if process.argv}
         if not {"rootlesskit", "dockerd", "containerd", "pasta"} <= executables:
             raise RuntimeError("native rootless daemon ancestry is incomplete")
@@ -509,6 +584,7 @@ def daemon_only():
         managed_containerd(config, containerd.argv)
         append_observation(RECEIPT.with_suffix(".observation.json"), {
             "daemon_id": daemon_id, "info_unit": info_unit, "actors": details,
+            "detached_netns": detached, "observer_mounts_before": observer_mounts,
             "containerd_config": config.decode(), "limits": bounded_parent(parent.cgroup),
             "socket_label": os.getxattr(R / "docker.sock", "security.selinux").hex(),
         })
@@ -516,8 +592,8 @@ def daemon_only():
             raise RuntimeError("insufficient teardown time")
         info_stop = stop_owned(info_unit)
         daemon_stop = stop_owned(daemon)
-        check_stopped_objects(parent, processes)
-        namespaces_closed(processes, details, baseline)
+        terminal = [stopped_unit(unit) for unit in (info_unit, daemon)]
+        closure = owned_references_closed(parent, processes, detached, owner, observer_mounts, boot)
         if before != host_state():
             raise RuntimeError("host state changed")
         if any(hashlib.sha256(Path(path).read_bytes()).hexdigest() != digest
@@ -525,10 +601,9 @@ def daemon_only():
             raise RuntimeError("source changed during attempt")
         append_observation(RECEIPT.with_suffix(".stopped.json"),
                            {"info_job": info_stop, "daemon_job": daemon_stop,
-                            "private_namespaces": sorted({value for process in processes
-                                                          for _, value in process.namespaces}
-                                                         - set(baseline))})
+                            "terminal_units": terminal, "owned_reference_closure": closure})
         parent_stop = stop_owned(parent)
+        parent_terminal = stopped_unit(parent)
         check_stopped_objects(parent, processes)
         if time.monotonic() > deadline:
             raise RuntimeError("attempt exceeded 300 seconds")
@@ -540,6 +615,7 @@ def daemon_only():
                               "uid": metadata.st_uid, "gid": metadata.st_gid, "mode": metadata.st_mode})
         append_observation(RECEIPT.with_suffix(".closed.json"),
                            {"status": "closed", "source": source, "slice_stop_job": parent_stop,
+                            "slice_terminal": parent_terminal, "owned_reference_closure": closure,
                             "retained_owned_files": files})
     except BaseException as error:
         append_observation(RECEIPT.with_suffix(".failed.json"),

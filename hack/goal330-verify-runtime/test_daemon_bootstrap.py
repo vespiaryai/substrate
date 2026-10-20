@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -121,7 +122,11 @@ class DaemonOnlyTest(unittest.TestCase):
         old = bootstrap.UnitIdentity(bootstrap.DAEMON, b"a" * 16, "/owned", "/job/1")
         new = bootstrap.UnitIdentity(bootstrap.DAEMON, b"b" * 16, "/owned", "/job/2")
         with patch.object(bootstrap, "user_bus", return_value=Mock()), patch.object(
-                bootstrap, "identity", return_value=new), patch.object(bootstrap, "owned_job") as mutate:
+                bootstrap, "identity", return_value=old) as current, patch.object(
+                bootstrap, "owned_job", return_value="/job/3") as mutate:
+            self.assertEqual(bootstrap.stop_owned(old), "/job/3")
+            mutate.reset_mock()
+            current.return_value = new
             with self.assertRaises(RuntimeError):
                 bootstrap.stop_owned(old)
             mutate.assert_not_called()
@@ -165,6 +170,191 @@ class DaemonOnlyTest(unittest.TestCase):
                 alarm.assert_called_once_with(300)
                 mutate.assert_not_called()
                 create.assert_not_called()
+
+
+class OwnedScopeTest(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        self.proc = self.root / "proc"
+        self.group = self.root / "cgroup"
+        self.runtime = self.root / "runtime"
+        for name, value in {"PROC": self.proc, "CGROUP": self.group,
+                            "P": self.root / "persistent", "R": self.runtime}.items():
+            patcher = patch.object(bootstrap, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        (self.group / "owned.slice").mkdir(parents=True)
+        self.events = self.group / "owned.slice/cgroup.events"
+        self.events.write_text("populated 0\nfrozen 0\n")
+        (self.proc / "self/fd").mkdir(parents=True)
+        self.mounts = "1 0 0:1 / / rw - tmpfs tmpfs rw\n"
+        (self.proc / "self/mountinfo").write_text(self.mounts)
+        (self.proc / "sys/kernel/random").mkdir(parents=True)
+        (self.proc / "sys/kernel/random/boot_id").write_text("owned-boot\n")
+        self.parent = bootstrap.UnitIdentity(bootstrap.SLICE, b"a" * 16, "/owned.slice", "/job/1")
+        self.write_process(71, 91, "/observer")
+        self.owner = bootstrap.process_identity(71, "/observer")
+        self.write_process(72, 92, "/owned.slice/daemon.service")
+        self.actor = bootstrap.process_identity(72, "/owned.slice")
+        (self.runtime / "rootlesskit").mkdir(parents=True)
+        (self.runtime / "rootlesskit/child_pid").write_text("72\n")
+        self.netns = self.proc / "72/root" / (self.runtime / "rootlesskit/netns").relative_to("/")
+        self.netns.parent.mkdir(parents=True)
+        self.netns.touch()
+        metadata = self.netns.stat()
+        self.net_mount = (f"2 1 {os.major(metadata.st_dev)}:{os.minor(metadata.st_dev)} "
+                          f"net:[{metadata.st_ino}] {self.runtime}/rootlesskit/netns rw - nsfs nsfs rw\n")
+        (self.proc / "72/mountinfo").write_text(self.net_mount)
+        self.detached = bootstrap.detached_netns(self.parent, [self.actor])
+        (self.proc / "72/stat").unlink()
+
+    def write_process(self, pid, starttime, cgroup):
+        root = self.proc / str(pid)
+        (root / "ns").mkdir(parents=True, exist_ok=True)
+        (root / "stat").write_text(f"{pid} (owned) " + " ".join(["S", "1", *["0"] * 17, str(starttime)]))
+        (root / "cgroup").write_text(f"0::{cgroup}\n")
+        (root / "cmdline").write_bytes(b"/usr/bin/dockerd\0")
+        for name in ("mnt", "net", "user"):
+            path = root / "ns" / name
+            if not path.is_symlink():
+                path.symlink_to(f"{name}:[{pid}]")
+
+    def close(self):
+        return bootstrap.owned_references_closed(self.parent, [self.actor], self.detached,
+                                                 self.owner, self.mounts, "owned-boot")
+
+    def test_unreadable_unrelated_subject_is_never_queried(self):
+        read_text = Path.read_text
+        iterdir = Path.iterdir
+        queries = []
+
+        def scoped_read(path, *args, **kwargs):
+            queries.append(path)
+            if path == self.proc / "3089" or self.proc / "3089" in path.parents:
+                raise PermissionError("unrelated subject denied")
+            return read_text(path, *args, **kwargs)
+
+        def scoped_list(path):
+            if path in (self.proc, Path("/proc")):
+                raise AssertionError("universal process census is forbidden")
+            return iterdir(path)
+
+        with patch.object(Path, "read_text", scoped_read), patch.object(Path, "iterdir", scoped_list):
+            closure = self.close()
+            self.assertEqual(closure["contract"], "owned-actors-and-references")
+            self.assertEqual(closure["outside_holders"], "unmeasured")
+            self.assertTrue(queries)
+            self.assertFalse(any(self.proc / "3089" in path.parents for path in queries))
+            with self.assertRaises(PermissionError):
+                (self.proc / "3089/stat").read_text()
+
+    def test_owned_denial_is_not_absence(self):
+        self.assertEqual(self.close()["contract"], "owned-actors-and-references")
+        original = Path.read_text
+
+        def denied(path, *args, **kwargs):
+            if path == self.proc / "72/stat":
+                raise PermissionError("owned metadata denied")
+            return original(path, *args, **kwargs)
+
+        with patch.object(Path, "read_text", denied), self.assertRaises(PermissionError):
+            self.close()
+
+    def test_live_original_actor_refused_but_pid_reuse_is_not_original(self):
+        self.write_process(72, 93, "/unrelated-reused-pid")
+        self.assertEqual(self.close()["contract"], "owned-actors-and-references")
+        self.write_process(72, 92, "/owned.slice/daemon.service")
+        with self.assertRaisesRegex(RuntimeError, "remains alive"):
+            self.close()
+
+    def test_populated_unseen_descendant_refused(self):
+        self.assertEqual(self.close()["contract"], "owned-actors-and-references")
+        self.events.write_text("populated 1\nfrozen 0\n")
+        with self.assertRaisesRegex(RuntimeError, "populated"):
+            self.close()
+
+    def test_escaped_owned_actor_refused(self):
+        self.write_process(72, 92, "/owned.slice/daemon.service")
+        self.assertEqual(bootstrap.process_identity(72, "/owned.slice").starttime, 92)
+        (self.proc / "72/cgroup").write_text("0::/outside\n")
+        with self.assertRaisesRegex(RuntimeError, "escaped"):
+            bootstrap.process_identity(72, "/owned.slice")
+
+    def test_stale_owned_socket_refused(self):
+        self.assertEqual(self.close()["contract"], "owned-actors-and-references")
+        (self.runtime / "docker.sock").touch()
+        with self.assertRaisesRegex(RuntimeError, "retained socket"):
+            self.close()
+
+    def test_exported_observer_mount_refused(self):
+        self.assertEqual(self.close()["contract"], "owned-actors-and-references")
+        exported = self.net_mount.replace(f"{self.runtime}/rootlesskit/netns", "/exported-netns")
+        (self.proc / "self/mountinfo").write_text(self.mounts + exported)
+        with self.assertRaisesRegex(RuntimeError, "observer mount table"):
+            self.close()
+
+    def test_detached_netns_stat_must_match_owned_nsfs_mount(self):
+        self.write_process(72, 92, "/owned.slice/daemon.service")
+        self.assertEqual(bootstrap.detached_netns(self.parent, [self.actor]).inode, self.netns.stat().st_ino)
+        (self.proc / "72/mountinfo").write_text(self.net_mount.replace("net:[", "user:["))
+        with self.assertRaisesRegex(RuntimeError, "identity mismatch"):
+            bootstrap.detached_netns(self.parent, [self.actor])
+
+    def test_observer_private_namespace_descriptor_refused(self):
+        self.assertEqual(self.close()["observer_private_namespace_fds"], "none")
+        (self.proc / "self/fd/7").symlink_to(f"net:[{self.detached.inode}]")
+        with self.assertRaisesRegex(RuntimeError, "namespace descriptor"):
+            self.close()
+
+    def test_changed_boot_refused(self):
+        self.assertEqual(self.close()["contract"], "owned-actors-and-references")
+        (self.proc / "sys/kernel/random/boot_id").write_text("other-boot\n")
+        with self.assertRaisesRegex(RuntimeError, "boot changed"):
+            self.close()
+
+    def test_native_terminal_state_and_job_required(self):
+        unit = {"ActiveState": "inactive", "SubState": "dead", "Job": (0, "/"),
+                "InvocationID": b"a" * 16}
+        manager = Mock()
+        manager.ListJobs.return_value = []
+        with patch.object(bootstrap, "user_bus", return_value=Mock()), patch.object(
+                bootstrap.dbus, "Interface", return_value=manager), patch.object(
+                bootstrap, "properties", return_value=unit):
+            self.assertEqual(bootstrap.stopped_unit(self.parent)["state"], "inactive/dead")
+            for invocation in (b"", bytes(16)):
+                with self.subTest(invocation=invocation), patch.object(
+                        bootstrap, "properties", return_value=unit | {"InvocationID": invocation}):
+                    self.assertEqual(bootstrap.stopped_unit(self.parent)["state"], "inactive/dead")
+            for change in ({"ActiveState": "active"}, {"InvocationID": b"b" * 16}, {"Job": (1, "/job/1")}):
+                with self.subTest(change=change), patch.object(
+                        bootstrap, "properties", return_value=unit | change), self.assertRaises(RuntimeError):
+                    bootstrap.stopped_unit(self.parent)
+            manager.ListJobs.return_value = [(1, bootstrap.SLICE)]
+            with self.assertRaisesRegex(RuntimeError, "still has a job"):
+                bootstrap.stopped_unit(self.parent)
+
+    def test_terminal_service_main_pid_and_native_absence(self):
+        owned = bootstrap.UnitIdentity(bootstrap.DAEMON, b"a" * 16, "/owned.slice/daemon", "/job/1")
+        unit = {"ActiveState": "inactive", "SubState": "dead", "Job": (0, "/"),
+                "InvocationID": b"a" * 16, "MainPID": 0}
+        manager = Mock()
+        manager.ListJobs.return_value = []
+        with patch.object(bootstrap, "user_bus", return_value=Mock()), patch.object(
+                bootstrap.dbus, "Interface", return_value=manager), patch.object(
+                bootstrap, "properties", return_value=unit) as properties:
+            self.assertEqual(bootstrap.stopped_unit(owned)["state"], "inactive/dead")
+            properties.return_value = unit | {"MainPID": 72}
+            with self.assertRaisesRegex(RuntimeError, "main PID"):
+                bootstrap.stopped_unit(owned)
+            properties.side_effect = bootstrap.dbus.DBusException(
+                "absent", name="org.freedesktop.systemd1.NoSuchUnit")
+            self.assertEqual(bootstrap.stopped_unit(owned)["state"], "absent")
+            properties.side_effect = bootstrap.dbus.DBusException(
+                "denied", name="org.freedesktop.DBus.Error.AccessDenied")
+            with self.assertRaises(bootstrap.dbus.DBusException):
+                bootstrap.stopped_unit(owned)
 
 
 if __name__ == "__main__":
