@@ -1,0 +1,15 @@
+Working directory was /home/zack/orca/workspaces/substrate-goal330-20261020/goal330-verify-runtime-diagnostic.
+Each command's stdout, stderr, and exit status are preserved under this evidence directory with the indicated stem.
+The commands queried registry manifest metadata only. No config blobs or layers were fetched.
+
+postgres-index
+timeout --signal=TERM --kill-after=3s 30s /usr/bin/skopeo --command-timeout=25s inspect --raw --no-creds --authfile /dev/null --retry-times=0 docker://docker.io/library/postgres:18-alpine
+
+ryuk-index
+timeout --signal=TERM --kill-after=3s 30s /usr/bin/skopeo --command-timeout=25s inspect --raw --no-creds --authfile /dev/null --retry-times=0 docker://docker.io/testcontainers/ryuk:0.14.0
+
+postgres-amd64
+timeout --signal=TERM --kill-after=3s 30s /usr/bin/skopeo --command-timeout=25s inspect --raw --no-creds --authfile /dev/null --retry-times=0 docker://docker.io/library/postgres@sha256:d8703cd7fba306b9fec9268ecedfa8a966846c053036a60e3635791957eb2f66
+
+ryuk-amd64
+timeout --signal=TERM --kill-after=3s 30s /usr/bin/skopeo --command-timeout=25s inspect --raw --no-creds --authfile /dev/null --retry-times=0 docker://docker.io/testcontainers/ryuk@sha256:f0456560ea5b4acdbed0da0efc33b5f9dd6bc1e59f2337106826dcb5b0b0e981
