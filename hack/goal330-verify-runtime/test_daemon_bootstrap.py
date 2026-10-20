@@ -21,9 +21,59 @@ from unittest.mock import Mock, patch
 import xml.etree.ElementTree as ET
 
 import daemon_bootstrap as bootstrap
+import systemd_job
 
 
 class DaemonOnlyTest(unittest.TestCase):
+    def test_info_uses_native_file_properties_without_creating_files(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+                bootstrap, "P", Path(directory)):
+            properties = bootstrap.info_properties()
+            props = dict(properties)
+            self.assertEqual(str(properties.signature), "(sv)")
+            self.assertEqual(str(props["StandardOutputFile"]), directory + "/info.json")
+            self.assertEqual(str(props["StandardErrorFile"]), directory + "/info.stderr")
+            self.assertIsInstance(props["StandardOutputFile"], bootstrap.dbus.String)
+            self.assertIsInstance(props["StandardErrorFile"], bootstrap.dbus.String)
+            self.assertNotIn("StandardOutput", props)
+            self.assertNotIn("StandardError", props)
+            self.assertEqual(list(Path(directory).iterdir()), [])
+            self.assertEqual(str(props["Type"]), "oneshot")
+            self.assertTrue(props["RemainAfterExit"])
+            self.assertEqual(str(props["Slice"]), bootstrap.SLICE)
+            self.assertEqual(str(props["KillMode"]), "control-group")
+            self.assertEqual(str(props["Restart"]), "no")
+            self.assertEqual(int(props["TimeoutStartUSec"]), 10000000)
+            self.assertEqual(int(props["TimeoutStopUSec"]), 5000000)
+
+    def test_info_creation_rejection_propagates_without_output_or_job_wait(self):
+        bus, manager, loop = Mock(), Mock(), Mock()
+        error = bootstrap.dbus.exceptions.DBusException(
+            "Invalid StandardOutput setting: file:/private/info.json",
+            name="org.freedesktop.DBus.Error.InvalidArgs")
+        manager.StartTransientUnit.side_effect = error
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+                bootstrap, "P", Path(directory)), patch.object(
+                systemd_job.dbus, "Interface", return_value=manager), patch.object(
+                systemd_job.GLib, "MainLoop", return_value=loop), patch.object(
+                systemd_job.GLib, "timeout_add_seconds", return_value=71), patch.object(
+                systemd_job.GLib, "source_remove") as remove:
+            with self.assertRaises(bootstrap.dbus.exceptions.DBusException) as raised:
+                bootstrap.owned_job(bus, bootstrap.INFO, lambda native: native.StartTransientUnit(
+                    bootstrap.INFO, "fail", bootstrap.info_properties(),
+                    bootstrap.dbus.Array([], signature="(sa(sv))"), timeout=5))
+            self.assertIs(raised.exception, error)
+            self.assertEqual(raised.exception.get_dbus_name(),
+                             "org.freedesktop.DBus.Error.InvalidArgs")
+            sent = manager.StartTransientUnit.call_args.args
+            self.assertEqual(sent[:2], (bootstrap.INFO, "fail"))
+            self.assertEqual(str(dict(sent[2])["StandardOutputFile"]), directory + "/info.json")
+            self.assertEqual(str(dict(sent[2])["StandardErrorFile"]), directory + "/info.stderr")
+            self.assertEqual(list(Path(directory).iterdir()), [])
+            loop.run.assert_not_called()
+            remove.assert_called_once_with(71)
+            bus.close.assert_called_once_with()
+
     def test_installed_native_unit_contracts(self):
         root = Path("/usr/share/dbus-1/interfaces")
         for kind, required in {

@@ -371,7 +371,8 @@ def info_properties():
         ("KillMode", dbus.String("control-group")),
         ("TimeoutStartUSec", dbus.UInt64(10000000)),
         ("TimeoutStopUSec", dbus.UInt64(5000000)),
-        ("StandardOutput", dbus.String(f"file:{P}/info.json")),
+        ("StandardOutputFile", dbus.String(str(P / "info.json"))),
+        ("StandardErrorFile", dbus.String(str(P / "info.stderr"))),
         ("ExecStart", dbus.Array([(argv[0], argv, False)], signature="(sasb)")),
     ], signature="(sv)")
 

@@ -1,0 +1,5 @@
+d0618eae84b09bf9f951d5366854d24e6f79b3abde30ab6157c753da592a7beb  hack/goal330-verify-runtime/daemon_bootstrap.py
+1bc705bf80f888763c2de10fb8a529d5d145a876d15265f3ce90900654b001b0  hack/goal330-verify-runtime/test_daemon_bootstrap.py
+6abe7b88a0916aa4271e831b0b1c80395ba56c87b68084aca0dea7c49e4f3f5c  hack/goal330-verify-runtime/systemd_job.py
+adb0916f9866a012b7ae6ded920cade5fce982f1dd85323d4d25e94b9479d37b  hack/goal330-verify-runtime/test_systemd_job.py
+6ece5b8fd5489fb4ced517bbac9f600927cab90ae0b28ec67236cbafae0419ed  docs/dev/verify-runtime-20261020/daemon-native-info-output-proposal.md
