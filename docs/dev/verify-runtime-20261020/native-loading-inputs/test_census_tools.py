@@ -352,6 +352,190 @@ Dynamic section at offset 0x100 contains 3 entries:
         self.assertIsNone(projection['entry']['fits_current_limits'])
         self.assertIsNone(projection['import_report']['full_serialized_bytes'])
 
+    def test_metadata_cancellation_continues_after_finalizer_errors(self):
+        body = ('import os, signal, time\n'
+                'def stop(*args):\n'
+                ' os.write(2, b"final-stderr"); raise SystemExit(0)\n'
+                'signal.signal(signal.SIGTERM, stop)\n'
+                'os.kill(os.getppid(), signal.SIGTERM)\n'
+                'time.sleep(30)\n')
+        owner, executable, subject = self.metadata_fixture(body)
+        original_open = Path.open
+        original_fsync = os.fsync
+        original_document = owner.document
+        archives = {}
+
+        class FailingFinalizer:
+            def __init__(self, stream):
+                self.stream = stream
+
+            def write(self, body):
+                return self.stream.write(body)
+
+            def fileno(self):
+                return self.stream.fileno()
+
+            def flush(self):
+                raise OSError('fixture stdout flush')
+
+            def close(self):
+                self.stream.close()
+                raise OSError('fixture stdout close')
+
+        def open_archive(path, *args, **kwargs):
+            stream = original_open(path, *args, **kwargs)
+            if path.name in ('0001.stdout.raw', '0001.stderr.raw') and args == ('xb',):
+                archives[path.name] = stream
+                if path.name == '0001.stdout.raw':
+                    return FailingFinalizer(stream)
+            return stream
+
+        def fsync_archive(descriptor):
+            stdout = archives.get('0001.stdout.raw')
+            if stdout is not None and not stdout.closed and descriptor == stdout.fileno():
+                raise OSError('fixture stdout fsync')
+            return original_fsync(descriptor)
+
+        def write_closure(name, value):
+            original_document(name, value)
+            if name == 'tools/0001.closed.json':
+                raise OSError('fixture closure record')
+
+        previous = signal.signal(signal.SIGTERM, census_tools.interrupted)
+        try:
+            with patch.dict(census_tools.TOOLS, {'readelf': str(executable)}), \
+                    patch.object(Path, 'open', open_archive), \
+                    patch.object(census_tools.os, 'fsync', side_effect=fsync_archive), \
+                    patch.object(owner, 'document', side_effect=write_closure):
+                with self.assertRaises(census_tools.Incomplete) as raised:
+                    owner.metadata('readelf', [str(subject)])
+        finally:
+            signal.signal(signal.SIGTERM, previous)
+        run = owner.runs[0]
+        self.assertEqual(str(raised.exception.__cause__), 'parent interrupted')
+        self.assertEqual(run['error'], 'parent interrupted')
+        for message in ('fixture stdout flush', 'fixture stdout fsync',
+                        'fixture stdout close', 'fixture closure record'):
+            self.assertTrue(any(message in error for error in run['cleanup_errors']), message)
+        self.assertTrue(all(stream.closed for stream in archives.values()))
+        self.assertEqual((self.output / run['streams']['stderr']['name']).read_bytes(), b'final-stderr')
+        closure = json.loads((self.output / 'tools/0001.closed.json').read_bytes())
+        self.assertEqual(closure['error'], 'parent interrupted')
+        self.assertTrue(closure['reaped'])
+        self.assertTrue(closure['group_closed'])
+        self.assertTrue(run['reaped'])
+        self.assertTrue(run['group_closed'])
+        self.assertFalse(run['complete'])
+        self.assertFalse((self.output / 'tools/0001.complete.json').exists())
+
+    def test_metadata_second_parent_signal_still_kills_and_reaps(self):
+        body = ('import os, signal, time\n'
+                'def stop(*args):\n'
+                ' os.write(2, b"second-term"); os.kill(os.getppid(), signal.SIGTERM)\n'
+                'signal.signal(signal.SIGTERM, stop)\n'
+                'os.kill(os.getppid(), signal.SIGTERM)\n'
+                'time.sleep(30)\n')
+        owner, executable, subject = self.metadata_fixture(body)
+        previous = signal.signal(signal.SIGTERM, census_tools.interrupted)
+        try:
+            with patch.dict(census_tools.TOOLS, {'readelf': str(executable)}):
+                with self.assertRaises(census_tools.Incomplete) as raised:
+                    owner.metadata('readelf', [str(subject)])
+        finally:
+            signal.signal(signal.SIGTERM, previous)
+        run = owner.runs[0]
+        self.assertEqual(str(raised.exception.__cause__), 'parent interrupted')
+        self.assertEqual(run['error'], 'parent interrupted')
+        self.assertTrue(any('SIGTERM during cleanup' in error for error in run['cleanup_errors']))
+        self.assertEqual((self.output / run['streams']['stderr']['name']).read_bytes(), b'second-term')
+        self.assertEqual(run['returncode'], -signal.SIGKILL)
+        self.assertTrue(run['reaped'])
+        self.assertTrue(run['group_closed'])
+        self.assertFalse(run['complete'])
+
+    def test_metadata_drain_error_preserves_other_stream_prefix(self):
+        body = ('import os, signal, time\n'
+                'def stop(*args):\n'
+                ' os.write(1, b"bad-drain"); os.write(2, b"retained-term-stderr"); raise SystemExit(0)\n'
+                'signal.signal(signal.SIGTERM, stop)\n'
+                'os.kill(os.getppid(), signal.SIGTERM)\n'
+                'time.sleep(30)\n')
+        owner, executable, subject = self.metadata_fixture(body)
+        original_read = os.read
+
+        def fail_stdout(descriptor, amount):
+            chunk = original_read(descriptor, amount)
+            if chunk == b'bad-drain':
+                raise OSError('fixture stdout drain')
+            return chunk
+
+        previous = signal.signal(signal.SIGTERM, census_tools.interrupted)
+        try:
+            with patch.dict(census_tools.TOOLS, {'readelf': str(executable)}), \
+                    patch.object(census_tools.os, 'read', side_effect=fail_stdout):
+                with self.assertRaises(census_tools.Incomplete) as raised:
+                    owner.metadata('readelf', [str(subject)])
+        finally:
+            signal.signal(signal.SIGTERM, previous)
+        run = owner.runs[0]
+        self.assertEqual(str(raised.exception.__cause__), 'parent interrupted')
+        self.assertEqual(run['error'], 'parent interrupted')
+        self.assertTrue(any('stdout drain' in error for error in run['cleanup_errors']))
+        raw = run['streams']['stderr']
+        self.assertEqual((self.output / raw['name']).read_bytes(), b'retained-term-stderr')
+        self.assertEqual(raw['partial_sha256'], hashlib.sha256(b'retained-term-stderr').hexdigest())
+        self.assertFalse(run['pipes_drained'])
+        self.assertTrue(run['reaped'])
+        self.assertTrue(run['group_closed'])
+        self.assertFalse(run['complete'])
+
+    def test_metadata_facts_joins_exact_archive_and_refuses_changed_evidence(self):
+        subject = self.inputs / 'cache-subject'
+        subject.write_bytes(b'authored cache subject, never interpreted by a utility')
+        owner = self.owner()
+        owner.capture(str(subject), 'fixture-subject')
+        archive = str(self.output / owner.regular_row(str(subject))['raw']['name'])
+        body = (f"1 libs found in cache `{archive}'\n"
+                '\tliba.so (libc6,x86-64) => /lib64/liba.so\n'
+                'Cache generated by: ldconfig (GNU libc) stable release version 2.43\n'
+                'File size: 256 bytes.\n').encode('ascii')
+        streams = {}
+        for name, value in (('stdout', body), ('stderr', b'')):
+            raw = {'name': f'tools/literal.{name}.raw', 'size': len(value),
+                   'sha256': hashlib.sha256(value).hexdigest()}
+            (self.output / raw['name']).write_bytes(value)
+            streams[name] = raw
+        run = {'complete': True, 'returncode': 0, 'reaped': True, 'group_closed': True,
+               'subjects': [str(subject)], 'argv': ['/usr/sbin/ldconfig', '--print-cache', '-C', archive],
+               'streams': streams}
+        self.assertEqual(owner.metadata_facts(run), {
+            'scope': 'authored-text-grammar-only',
+            'facts': [{'soname': 'liba.so', 'abi': 'libc6,x86-64', 'hwcap': None, 'path': '/lib64/liba.so'}],
+            'selection': 'unobserved', 'tool_output_qualified': False, 'bootstrap_closed': False,
+            'authorities': {'application': False, 'import': False, 'offline': False, 'holder': False,
+                            'finite': False, 'recheck': False, 'native': False}})
+        for change in ('argv', 'digest', 'size', 'reaped', 'group_closed', 'absent-closure'):
+            altered = json.loads(json.dumps(run))
+            if change == 'argv':
+                altered['argv'][1] = '--verbose'
+            elif change == 'digest':
+                altered['streams']['stdout']['sha256'] = '0' * 64
+            elif change == 'size':
+                altered['streams']['stdout']['size'] += 1
+            elif change == 'absent-closure':
+                del altered['reaped']
+                del altered['group_closed']
+            else:
+                altered[change] = False
+            with self.subTest(change=change):
+                with self.assertRaises(census_tools.Incomplete):
+                    owner.metadata_facts(altered)
+        diagnostic = b'warning\n'
+        (self.output / streams['stderr']['name']).write_bytes(diagnostic)
+        run['streams']['stderr'].update(size=len(diagnostic), sha256=hashlib.sha256(diagnostic).hexdigest())
+        with self.assertRaisesRegex(census_tools.Incomplete, 'diagnostic output'):
+            owner.metadata_facts(run)
+
 
 if __name__ == '__main__':
     signal.signal(signal.SIGTERM, census_tools.interrupted)
