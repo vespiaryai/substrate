@@ -68,6 +68,24 @@ func gvisorDefaultLister(t *testing.T) listersv1alpha1.SandboxConfigLister {
 	}})
 }
 
+func TestCreateActorTemplateRejectsReservedContainerNameBeforeDependencies(t *testing.T) {
+	s := &RPCService{sandboxConfigLister: sandboxConfigListerFor(t, nil)}
+	req := &ateapipb.CreateActorTemplateRequest{ActorTemplate: validActorTemplate(func(tmpl *ateapipb.ActorTemplate) {
+		tmpl.Containers[0].Name = "pause"
+	})}
+
+	got, err := s.CreateActorTemplate(context.Background(), req)
+	if got != nil {
+		t.Errorf("CreateActorTemplate response = %v, want nil", got)
+	}
+	if apierror.Code(err) != codes.InvalidArgument {
+		t.Fatalf("CreateActorTemplate error = %v, want InvalidArgument", err)
+	}
+	if !strings.Contains(err.Error(), "actor_template.containers[0].name") || !strings.Contains(err.Error(), "pause") {
+		t.Errorf("CreateActorTemplate error = %v, want indexed field and reserved name", err)
+	}
+}
+
 // TestCreateActorTemplate_SandboxConfigChecks pins the create-time checks on
 // the template's named SandboxConfig: it must exist and match the template's
 // class, both FailedPrecondition — they depend on cluster state, and the
