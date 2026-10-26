@@ -16,8 +16,11 @@ package egress
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	envoy_type "github.com/envoyproxy/go-control-plane/envoy/type/v3"
@@ -55,10 +58,7 @@ func mapCredentialProviderError(err error) error {
 // name); a request without it goes out unchanged, and its credential is not
 // fetched.
 //
-// Any failure to produce a credential the request needs denies it, including
-// having no provider configured.
-//
-// This gateway cannot mint actor JWTs yet, so a request that needs one is denied.
+// Any failure to produce a credential the request needs denies it.
 func (h *Handler) applyEffects(ctx context.Context, ref resources.ActorRef, dest egresspolicy.Destination, headers map[string]string, effects *ateapipb.HttpRuleEffects) ([]*corev3.HeaderValueOption, error) {
 	var injections []*ateapipb.CredentialHeader
 	for _, inj := range effects.GetReplaceHeaders() {
@@ -68,20 +68,6 @@ func (h *Handler) applyEffects(ctx context.Context, ref resources.ActorRef, dest
 	}
 	if len(injections) == 0 {
 		return nil, nil
-	}
-
-	// TODO(identity): mint actor JWTs through Control.MintActorJWT.
-	for _, inj := range injections {
-		if inj.GetActorJwt() != nil {
-			slog.ErrorContext(ctx, "egress denied: this gateway cannot inject actor JWTs yet",
-				slog.Any("actor", ref), slog.String("host", dest.Hostname), slog.String("header", inj.GetHeader()))
-			return nil, extproc.NewReqError(envoy_type.StatusCode_NotImplemented, deniedBody)
-		}
-	}
-	if h.provider == nil {
-		slog.ErrorContext(ctx, "egress denied: policy requires credential injection but no credential provider is configured",
-			slog.Any("actor", ref), slog.String("host", dest.Hostname))
-		return nil, extproc.NewReqError(envoy_type.StatusCode_InternalServerError, deniedBody)
 	}
 
 	// Atunnel connected to us with an ateom-for-actor SPIFFE ID; translate it
@@ -94,6 +80,33 @@ func (h *Handler) applyEffects(ctx context.Context, ref resources.ActorRef, dest
 			slog.ErrorContext(ctx, "egress denied: policy names an unusable injection header",
 				slog.Any("actor", ref), slog.String("host", dest.Hostname), slog.String("header", inj.GetHeader()), slog.Any("err", err))
 			return nil, extproc.WrapReqError(envoy_type.StatusCode_InternalServerError, err, deniedBody)
+		}
+		if src := inj.GetActorJwt(); src != nil {
+			token, err := h.actorJWT(ctx, ref, src)
+			if err != nil {
+				code := envoy_type.StatusCode_InternalServerError
+				switch {
+				case ctx.Err() != nil:
+					code = envoy_type.StatusCode_RequestTimeout
+				case status.Code(err) == codes.NotFound, status.Code(err) == codes.PermissionDenied:
+					code = envoy_type.StatusCode_Forbidden
+				case status.Code(err) == codes.Unavailable, status.Code(err) == codes.DeadlineExceeded, errors.Is(err, context.DeadlineExceeded):
+					code = envoy_type.StatusCode_ServiceUnavailable
+				}
+				slog.ErrorContext(ctx, "egress denied: actor JWT mint failed",
+					slog.Any("actor", ref), slog.String("host", dest.Hostname), slog.String("header", inj.GetHeader()), slog.String("code", code.String()))
+				return nil, extproc.NewReqError(code, deniedBody)
+			}
+			setHeaders = append(setHeaders, &corev3.HeaderValueOption{
+				Header:       &corev3.HeaderValue{Key: inj.GetHeader(), RawValue: []byte("Bearer " + token)},
+				AppendAction: corev3.HeaderValueOption_OVERWRITE_IF_EXISTS_OR_ADD,
+			})
+			continue
+		}
+		if h.provider == nil {
+			slog.ErrorContext(ctx, "egress denied: policy requires credential injection but no credential provider is configured",
+				slog.Any("actor", ref), slog.String("host", dest.Hostname))
+			return nil, extproc.NewReqError(envoy_type.StatusCode_InternalServerError, deniedBody)
 		}
 
 		// Confirm the credential URI names the provider this gateway serves
@@ -141,4 +154,36 @@ func (h *Handler) applyEffects(ctx context.Context, ref resources.ActorRef, dest
 		})
 	}
 	return setHeaders, nil
+}
+
+// actorJWT treats the fetched policy as untrusted at the gateway boundary. The
+// API's policy validator remains authoritative for writes.
+func (h *Handler) actorJWT(ctx context.Context, ref resources.ActorRef, src *ateapipb.ActorJWTSource) (string, error) {
+	audiences := src.GetAudiences()
+	if len(audiences) == 0 || len(audiences) > 16 || src.GetExpirationSeconds() < 300 || src.GetExpirationSeconds() > 3600 {
+		return "", fmt.Errorf("invalid actor JWT policy")
+	}
+	seen := make(map[string]bool, len(audiences))
+	for _, audience := range audiences {
+		if len(audience) == 0 || len(audience) > 512 || seen[audience] {
+			return "", fmt.Errorf("invalid actor JWT audience")
+		}
+		seen[audience] = true
+	}
+	mintCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	resp, err := h.apiClient.MintActorJWT(mintCtx, &ateapipb.MintActorJWTRequest{
+		Actor:             ref.ToObjectRef(),
+		Audience:          audiences,
+		ExpirationSeconds: src.GetExpirationSeconds(),
+	})
+	if err != nil {
+		return "", err
+	}
+	token := resp.GetActorJwt()
+	clean, err := sanitizeSecret([]byte(token))
+	if err != nil || len(clean) != len(token) {
+		return "", fmt.Errorf("invalid actor JWT mint response")
+	}
+	return token, nil
 }
