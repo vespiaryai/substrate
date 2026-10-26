@@ -16,10 +16,15 @@ package controllers
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
+	networkingv1ac "k8s.io/client-go/applyconfigurations/networking/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/agent-substrate/substrate/internal/installdefaults"
 	"github.com/agent-substrate/substrate/internal/resources"
@@ -110,5 +115,59 @@ func TestBuildNetworkPolicyRelocatedNamespace(t *testing.T) {
 	got := np.Spec.Ingress[0].From[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"]
 	if got != relocated {
 		t.Errorf("ingress namespace selector = %q, want %q", got, relocated)
+	}
+}
+
+func TestBuildNetworkPolicyIngressPorts(t *testing.T) {
+	r := &NetworkPolicyReconciler{SystemNamespace: installdefaults.SystemNamespace}
+	np := r.buildNetworkPolicyApplyConfig(testWorkerPoolApplyConfig(nil))
+
+	if len(np.Spec.Ingress) != 1 {
+		t.Fatalf("ingress rules = %d, want 1", len(np.Spec.Ingress))
+	}
+	tcp := corev1.ProtocolTCP
+	https := intstr.FromInt32(443)
+	connect := intstr.FromInt32(8443)
+	want := []networkingv1ac.NetworkPolicyPortApplyConfiguration{
+		{Protocol: &tcp, Port: &https},
+		{Protocol: &tcp, Port: &connect},
+	}
+	if got := np.Spec.Ingress[0].Ports; !reflect.DeepEqual(got, want) {
+		t.Errorf("ingress ports = %+v, want %+v", got, want)
+	}
+}
+
+func TestReconcileNarrowsExistingNetworkPolicy(t *testing.T) {
+	ctx := t.Context()
+	wp := testWorkerPoolApplyConfig(nil)
+	wp.Name = "test-netpolicy-narrow"
+	r := &NetworkPolicyReconciler{Client: k8sClient, SystemNamespace: installdefaults.SystemNamespace}
+	broad := r.buildNetworkPolicyApplyConfig(wp)
+	broad.Spec.Ingress[0].Ports = nil
+	if err := r.Apply(ctx, broad, client.FieldOwner(networkPolicyFieldOwner), client.ForceOwnership); err != nil {
+		t.Fatalf("apply broad NetworkPolicy: %v", err)
+	}
+	np := &networkingv1.NetworkPolicy{}
+	key := types.NamespacedName{Name: *broad.Name, Namespace: *broad.Namespace}
+	if err := k8sClient.Get(ctx, key, np); err != nil {
+		t.Fatalf("get broad NetworkPolicy: %v", err)
+	}
+	deleteOnCleanup(t, np)
+	if len(np.Spec.Ingress) != 1 || len(np.Spec.Ingress[0].Ports) != 0 {
+		t.Fatalf("initial ingress = %+v, want one unrestricted rule", np.Spec.Ingress)
+	}
+
+	if err := r.reconcileImpl(ctx, wp); err != nil {
+		t.Fatalf("reconcile NetworkPolicy: %v", err)
+	}
+	if err := k8sClient.Get(ctx, key, np); err != nil {
+		t.Fatalf("get reconciled NetworkPolicy: %v", err)
+	}
+	tcp := corev1.ProtocolTCP
+	https := intstr.FromInt32(443)
+	connect := intstr.FromInt32(8443)
+	want := []networkingv1.NetworkPolicyPort{{Protocol: &tcp, Port: &https}, {Protocol: &tcp, Port: &connect}}
+	if len(np.Spec.Ingress) != 1 || !reflect.DeepEqual(np.Spec.Ingress[0].Ports, want) {
+		t.Errorf("reconciled ingress = %+v, want one rule with ports %+v", np.Spec.Ingress, want)
 	}
 }
