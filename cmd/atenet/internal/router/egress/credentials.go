@@ -34,13 +34,6 @@ import (
 	"github.com/agent-substrate/substrate/pkg/proto/credproviderpb"
 )
 
-// mapCredentialProviderError converts a FetchSecret failure into a
-// client-facing ext_proc denial, mirroring mapEgressIdentityError: a credential
-// the provider does not hold or will not release (NotFound, PermissionDenied)
-// denies as 403 — retrying cannot succeed — while a transient provider failure
-// (Unavailable, DeadlineExceeded) fails closed as a retryable 503. Anything
-// unexpected denies rather than inviting retries of a request that cannot be
-// completed as the policy promised.
 func mapCredentialProviderError(err error) error {
 	switch status.Code(err) {
 	case codes.NotFound, codes.PermissionDenied:
@@ -52,13 +45,6 @@ func mapCredentialProviderError(err error) error {
 	}
 }
 
-// applyEffects resolves a matched rule's credential injections and returns the
-// header mutations to add to the request, or an error that denies it. Only a
-// header the request carries is replaced (headers is keyed by lowercased
-// name); a request without it goes out unchanged, and its credential is not
-// fetched.
-//
-// Any failure to produce a credential the request needs denies it.
 func (h *Handler) applyEffects(ctx context.Context, ref resources.ActorRef, dest egresspolicy.Destination, headers map[string]string, effects *ateapipb.HttpRuleEffects) ([]*corev3.HeaderValueOption, error) {
 	var injections []*ateapipb.CredentialHeader
 	for _, inj := range effects.GetReplaceHeaders() {
@@ -109,10 +95,6 @@ func (h *Handler) applyEffects(ctx context.Context, ref resources.ActorRef, dest
 			return nil, extproc.NewReqError(envoy_type.StatusCode_InternalServerError, deniedBody)
 		}
 
-		// Confirm the credential URI names the provider this gateway serves
-		// before dialing: the configured connection fronts one provider, so a URI
-		// naming another cannot be resolved here and must fail closed rather than
-		// be sent to the wrong provider.
 		if h.providerName != "" {
 			name, err := providerNameFromURI(inj.GetCredentialUri())
 			if err != nil {
@@ -133,8 +115,6 @@ func (h *Handler) applyEffects(ctx context.Context, ref resources.ActorRef, dest
 			ActorSpiffeId: actorSpiffeID,
 		})
 		if err != nil {
-			// Fail closed: a credential the policy required but we could not fetch
-			// must not let the request out without it.
 			slog.ErrorContext(ctx, "egress denied: credential fetch failed",
 				slog.Any("actor", ref), slog.String("host", dest.Hostname), slog.String("uri", inj.GetCredentialUri()), slog.Any("err", err))
 			return nil, mapCredentialProviderError(err)
@@ -146,8 +126,6 @@ func (h *Handler) applyEffects(ctx context.Context, ref resources.ActorRef, dest
 			return nil, extproc.WrapReqError(envoy_type.StatusCode_ServiceUnavailable, err, deniedBody)
 		}
 
-		// Overwrite any header the actor set itself, so a client cannot pre-seed a
-		// value that survives injection.
 		setHeaders = append(setHeaders, &corev3.HeaderValueOption{
 			Header:       &corev3.HeaderValue{Key: inj.GetHeader(), RawValue: append([]byte(inj.GetPrefix()), secret...)},
 			AppendAction: corev3.HeaderValueOption_OVERWRITE_IF_EXISTS_OR_ADD,
@@ -156,8 +134,6 @@ func (h *Handler) applyEffects(ctx context.Context, ref resources.ActorRef, dest
 	return setHeaders, nil
 }
 
-// actorJWT treats the fetched policy as untrusted at the gateway boundary. The
-// API's policy validator remains authoritative for writes.
 func (h *Handler) actorJWT(ctx context.Context, ref resources.ActorRef, src *ateapipb.ActorJWTSource) (string, error) {
 	audiences := src.GetAudiences()
 	if len(audiences) == 0 || len(audiences) > 16 || src.GetExpirationSeconds() < 300 || src.GetExpirationSeconds() > 3600 {

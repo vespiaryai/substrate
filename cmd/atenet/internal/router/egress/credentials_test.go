@@ -36,11 +36,8 @@ import (
 	"github.com/agent-substrate/substrate/pkg/proto/credproviderpb"
 )
 
-// credentialInjectionPolicySample injects "authorization: Bearer <secret>" from
-// ate-secret://k8s/default/token, so the provider name under test is "k8s".
 const injectionProviderName = "k8s"
 
-// fakeProvider is a stub CredentialProviderClient recording the last request.
 type fakeProvider struct {
 	resp *credproviderpb.FetchSecretResponse
 	err  error
@@ -52,8 +49,6 @@ func (f *fakeProvider) FetchSecret(_ context.Context, req *credproviderpb.FetchS
 	return f.resp, f.err
 }
 
-// bearerTokenResponse is a FetchSecretResponse carrying a bearer-token
-// credential as its opaque secret bytes.
 func bearerTokenResponse(token string) *credproviderpb.FetchSecretResponse {
 	return &credproviderpb.FetchSecretResponse{OpaqueBytes: []byte(token)}
 }
@@ -62,15 +57,11 @@ func injectionHandlerFor(policy *ateapipb.EgressPolicy, provider credproviderpb.
 	return New(&egressMockClient{actor: runningActor(), policy: policy}, nil, 0, provider, providerName)
 }
 
-// withAuthorization adds the placeholder authorization header the sample
-// policy replaces, as the actor would send it.
 func withAuthorization(md *extproc.RequestMetadata) *extproc.RequestMetadata {
 	md.Headers["authorization"] = "Bearer placeholder"
 	return md
 }
 
-// Both HTTP and HTTPS resolve the credential using the actor's SPIFFE identity
-// and overwrite the header the request carries.
 func TestInjectionOnRequestLegs(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -115,8 +106,6 @@ func TestInjectionOnRequestLegs(t *testing.T) {
 	}
 }
 
-// A request that does not carry the header a rule replaces goes out unchanged:
-// nothing is fetched, added, or denied, even where injecting would fail.
 func TestInjectionSkippedWithoutHeader(t *testing.T) {
 	jwtPolicy := &ateapipb.EgressPolicy{Rules: []*ateapipb.EgressRule{{Https: &ateapipb.HTTPSRule{
 		Hostnames: []string{"api.example.com"},
@@ -155,8 +144,6 @@ func TestInjectionSkippedWithoutHeader(t *testing.T) {
 	}
 }
 
-// Of a rule's replacements, only those whose header the request carries are
-// applied, matching the header name case-insensitively.
 func TestInjectionReplacesOnlyCarriedHeaders(t *testing.T) {
 	policy := &ateapipb.EgressPolicy{Rules: []*ateapipb.EgressRule{{Https: &ateapipb.HTTPSRule{
 		Hostnames: []string{"api.example.com"},
@@ -186,8 +173,6 @@ func TestInjectionReplacesOnlyCarriedHeaders(t *testing.T) {
 	}
 }
 
-// A failure to produce the promised credential denies the
-// request rather than forwarding it without the credential.
 func TestInjectionDenials(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -203,18 +188,16 @@ func TestInjectionDenials(t *testing.T) {
 		{
 			name:         "credential URI for another provider is refused",
 			provider:     &fakeProvider{resp: bearerTokenResponse("s3cr3t")},
-			providerName: "vault", // policy URI is ate-secret://k8s/...
+			providerName: "vault",
 			want:         envoy_type.StatusCode_InternalServerError,
 		},
 		{
-			// A transient provider failure is retryable.
 			name:         "provider unavailable fails closed as retryable",
 			provider:     &fakeProvider{err: status.Error(codes.Unavailable, "provider down")},
 			providerName: injectionProviderName,
 			want:         envoy_type.StatusCode_ServiceUnavailable,
 		},
 		{
-			// A secret the provider does not hold cannot appear on retry.
 			name:         "secret not found denies as non-retryable",
 			provider:     &fakeProvider{err: status.Error(codes.NotFound, "no such secret")},
 			providerName: injectionProviderName,
@@ -227,7 +210,6 @@ func TestInjectionDenials(t *testing.T) {
 			want:         envoy_type.StatusCode_Forbidden,
 		},
 		{
-			// An unclassified error denies rather than inviting retries.
 			name:         "unexpected provider error denies",
 			provider:     &fakeProvider{err: errors.New("provider down")},
 			providerName: injectionProviderName,
