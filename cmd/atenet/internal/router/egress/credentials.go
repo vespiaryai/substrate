@@ -62,6 +62,9 @@ func (h *Handler) applyEffects(ctx context.Context, ref resources.ActorRef, dest
 
 	setHeaders := make([]*corev3.HeaderValueOption, 0, len(injections))
 	for _, inj := range injections {
+		if ctx.Err() != nil {
+			return nil, extproc.NewReqError(envoy_type.StatusCode_RequestTimeout, deniedBody)
+		}
 		if err := validateInjectHeader(inj.GetHeader()); err != nil {
 			slog.ErrorContext(ctx, "egress denied: policy names an unusable injection header",
 				slog.Any("actor", ref), slog.String("host", dest.Hostname), slog.String("header", inj.GetHeader()), slog.Any("err", err))
@@ -69,6 +72,9 @@ func (h *Handler) applyEffects(ctx context.Context, ref resources.ActorRef, dest
 		}
 		if src := inj.GetActorJwt(); src != nil {
 			token, err := h.actorJWT(ctx, ref, src)
+			if ctx.Err() != nil {
+				err = ctx.Err()
+			}
 			if err != nil {
 				code := envoy_type.StatusCode_InternalServerError
 				switch {
@@ -84,7 +90,7 @@ func (h *Handler) applyEffects(ctx context.Context, ref resources.ActorRef, dest
 				return nil, extproc.NewReqError(code, deniedBody)
 			}
 			setHeaders = append(setHeaders, &corev3.HeaderValueOption{
-				Header:       &corev3.HeaderValue{Key: inj.GetHeader(), RawValue: []byte("Bearer " + token)},
+				Header:       &corev3.HeaderValue{Key: inj.GetHeader(), RawValue: []byte(inj.GetPrefix() + token)},
 				AppendAction: corev3.HeaderValueOption_OVERWRITE_IF_EXISTS_OR_ADD,
 			})
 			continue

@@ -32,6 +32,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/agent-substrate/substrate/cmd/atenet/internal/router/extproc"
+	"github.com/agent-substrate/substrate/internal/egresspolicy"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"github.com/agent-substrate/substrate/pkg/proto/credproviderpb"
 )
@@ -242,11 +243,12 @@ func TestInjectionDenials(t *testing.T) {
 
 type jwtControlClient struct {
 	*egressMockClient
-	requests []*ateapipb.MintActorJWTRequest
-	tokens   []string
-	err      error
-	wait     bool
-	deadline time.Time
+	requests  []*ateapipb.MintActorJWTRequest
+	tokens    []string
+	err       error
+	wait      bool
+	deadline  time.Time
+	afterMint func()
 }
 
 func (c *jwtControlClient) MintActorJWT(ctx context.Context, req *ateapipb.MintActorJWTRequest, _ ...grpc.CallOption) (*ateapipb.MintActorJWTResponse, error) {
@@ -259,6 +261,9 @@ func (c *jwtControlClient) MintActorJWT(ctx context.Context, req *ateapipb.MintA
 	if c.err != nil {
 		return nil, c.err
 	}
+	if c.afterMint != nil {
+		c.afterMint()
+	}
 	if c.tokens == nil {
 		return &ateapipb.MintActorJWTResponse{ActorJwt: c.actor.GetMetadata().GetUid() + "-jwt"}, nil
 	}
@@ -267,7 +272,7 @@ func (c *jwtControlClient) MintActorJWT(ctx context.Context, req *ateapipb.MintA
 
 func jwtInjectionPolicy(leg string, audiences []string) *ateapipb.EgressPolicy {
 	effects := &ateapipb.HttpRuleEffects{ReplaceHeaders: []*ateapipb.CredentialHeader{{
-		Header: "authorization", ActorJwt: &ateapipb.ActorJWTSource{Audiences: audiences, ExpirationSeconds: 900},
+		Header: "authorization", Prefix: "Bearer ", ActorJwt: &ateapipb.ActorJWTSource{Audiences: audiences, ExpirationSeconds: 900},
 	}}}
 	if leg == extproc.EgressCleartextFilterChainName {
 		return &ateapipb.EgressPolicy{Rules: []*ateapipb.EgressRule{{Http: &ateapipb.HTTPRule{Hostnames: []string{"api.example.com"}, Effects: effects}}}}
@@ -312,6 +317,56 @@ func TestActorJWTInjection(t *testing.T) {
 				t.Fatalf("mint deadline = %v, want within four seconds", client.deadline)
 			}
 		}
+	}
+}
+
+func TestActorJWTInjectionPrefix(t *testing.T) {
+	for _, tc := range []struct {
+		name, prefix, want string
+	}{
+		{"bearer", "Bearer ", "Bearer actor-jwt"},
+		{"empty", "", "actor-jwt"},
+		{"alternate", "Token ", "Token actor-jwt"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &jwtControlClient{egressMockClient: &egressMockClient{actor: runningActor()}, tokens: []string{"actor-jwt"}}
+			h := New(client, nil, 0, nil, "")
+			effects := &ateapipb.HttpRuleEffects{ReplaceHeaders: []*ateapipb.CredentialHeader{{
+				Header: "authorization", Prefix: tc.prefix,
+				ActorJwt: &ateapipb.ActorJWTSource{Audiences: []string{"https://api.example.com"}, ExpirationSeconds: 900},
+			}}}
+			got, err := h.applyEffects(context.Background(), testActorRef, egresspolicy.Destination{Hostname: "api.example.com"},
+				map[string]string{"authorization": "Bearer placeholder"}, effects)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != 1 || string(got[0].GetHeader().GetRawValue()) != tc.want {
+				t.Fatalf("mutations = %v, want one authorization header with %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestActorJWTSuccessAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client := &jwtControlClient{
+		egressMockClient: &egressMockClient{actor: runningActor()},
+		tokens:           []string{"actor-jwt"},
+		afterMint:        cancel,
+	}
+	provider := &fakeProvider{resp: bearerTokenResponse("provider-secret")}
+	h := New(client, nil, 0, provider, injectionProviderName)
+	effects := &ateapipb.HttpRuleEffects{ReplaceHeaders: []*ateapipb.CredentialHeader{
+		{Header: "authorization", Prefix: "Bearer ", ActorJwt: &ateapipb.ActorJWTSource{Audiences: []string{"https://api.example.com"}, ExpirationSeconds: 900}},
+		{Header: "x-next-jwt", ActorJwt: &ateapipb.ActorJWTSource{Audiences: []string{"https://api.example.com"}, ExpirationSeconds: 900}},
+		{Header: "x-provider", CredentialUri: "ate-secret://k8s/default/token"},
+	}}
+	mutations, err := h.applyEffects(ctx, testActorRef, egresspolicy.Destination{Hostname: "api.example.com"},
+		map[string]string{"authorization": "placeholder", "x-next-jwt": "placeholder", "x-provider": "placeholder"}, effects)
+	wantStatus(t, err, envoy_type.StatusCode_RequestTimeout)
+	if mutations != nil || len(client.requests) != 1 || provider.got != nil {
+		t.Fatalf("cancelled request returned mutations %v, mint calls %d, provider fetch %v", mutations, len(client.requests), provider.got)
 	}
 }
 
