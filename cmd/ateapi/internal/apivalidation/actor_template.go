@@ -27,6 +27,7 @@ import (
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"k8s.io/apimachinery/pkg/api/operation"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/api/validate/content"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 )
@@ -61,14 +62,26 @@ func ValidateActorTemplateUpdate(ctx context.Context, fldPath *field.Path, newVa
 	return Validate_ActorTemplate(ctx, op, fldPath, newVal, oldVal)
 }
 
-// ValidateCustom_CreateActorTemplateRequest_ActorTemplate rejects container
-// volume mounts that reference volumes the template does not declare.
+// ValidateCustom_CreateActorTemplateRequest_ActorTemplate rejects invalid
+// container names and mounts that reference undeclared volumes.
 func ValidateCustom_CreateActorTemplateRequest_ActorTemplate(_ context.Context, _ operation.Operation, fldPath *field.Path, value, _ *ateapipb.ActorTemplate) field.ErrorList {
+	names := make([]string, len(value.GetContainers()))
+	for i, ctr := range value.GetContainers() {
+		names[i] = ctr.GetName()
+	}
+	var errs field.ErrorList
+	for i, name := range names {
+		if err := resources.ValidateContainerNames(names[:i+1]); err != nil {
+			if len(content.IsDNS1123Label(name)) == 0 {
+				errs = append(errs, field.Invalid(fldPath.Child("containers").Index(i).Child("name"), name, err.Error()))
+			}
+			break
+		}
+	}
 	declared := make(map[string]bool, len(value.GetVolumes()))
 	for _, vol := range value.GetVolumes() {
 		declared[vol.GetName()] = true
 	}
-	var errs field.ErrorList
 	for i, ctr := range value.GetContainers() {
 		for j, mount := range ctr.GetVolumeMounts() {
 			name := mount.GetName()
