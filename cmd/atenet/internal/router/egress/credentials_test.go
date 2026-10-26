@@ -15,9 +15,15 @@
 package egress
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
+	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	envoy_type "github.com/envoyproxy/go-control-plane/envoy/type/v3"
@@ -26,15 +32,13 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/agent-substrate/substrate/cmd/atenet/internal/router/extproc"
+	"github.com/agent-substrate/substrate/internal/egresspolicy"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"github.com/agent-substrate/substrate/pkg/proto/credproviderpb"
 )
 
-// credentialInjectionPolicySample injects "authorization: Bearer <secret>" from
-// ate-secret://k8s/default/token, so the provider name under test is "k8s".
 const injectionProviderName = "k8s"
 
-// fakeProvider is a stub CredentialProviderClient recording the last request.
 type fakeProvider struct {
 	resp *credproviderpb.FetchSecretResponse
 	err  error
@@ -46,8 +50,6 @@ func (f *fakeProvider) FetchSecret(_ context.Context, req *credproviderpb.FetchS
 	return f.resp, f.err
 }
 
-// bearerTokenResponse is a FetchSecretResponse carrying a bearer-token
-// credential as its opaque secret bytes.
 func bearerTokenResponse(token string) *credproviderpb.FetchSecretResponse {
 	return &credproviderpb.FetchSecretResponse{OpaqueBytes: []byte(token)}
 }
@@ -56,15 +58,11 @@ func injectionHandlerFor(policy *ateapipb.EgressPolicy, provider credproviderpb.
 	return New(&egressMockClient{actor: runningActor(), policy: policy}, nil, 0, provider, providerName)
 }
 
-// withAuthorization adds the placeholder authorization header the sample
-// policy replaces, as the actor would send it.
 func withAuthorization(md *extproc.RequestMetadata) *extproc.RequestMetadata {
 	md.Headers["authorization"] = "Bearer placeholder"
 	return md
 }
 
-// Both HTTP and HTTPS resolve the credential using the actor's SPIFFE identity
-// and overwrite the header the request carries.
 func TestInjectionOnRequestLegs(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -109,8 +107,6 @@ func TestInjectionOnRequestLegs(t *testing.T) {
 	}
 }
 
-// A request that does not carry the header a rule replaces goes out unchanged:
-// nothing is fetched, added, or denied, even where injecting would fail.
 func TestInjectionSkippedWithoutHeader(t *testing.T) {
 	jwtPolicy := &ateapipb.EgressPolicy{Rules: []*ateapipb.EgressRule{{Https: &ateapipb.HTTPSRule{
 		Hostnames: []string{"api.example.com"},
@@ -149,8 +145,6 @@ func TestInjectionSkippedWithoutHeader(t *testing.T) {
 	}
 }
 
-// Of a rule's replacements, only those whose header the request carries are
-// applied, matching the header name case-insensitively.
 func TestInjectionReplacesOnlyCarriedHeaders(t *testing.T) {
 	policy := &ateapipb.EgressPolicy{Rules: []*ateapipb.EgressRule{{Https: &ateapipb.HTTPSRule{
 		Hostnames: []string{"api.example.com"},
@@ -180,8 +174,6 @@ func TestInjectionReplacesOnlyCarriedHeaders(t *testing.T) {
 	}
 }
 
-// A failure to produce the promised credential denies the
-// request rather than forwarding it without the credential.
 func TestInjectionDenials(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -197,18 +189,16 @@ func TestInjectionDenials(t *testing.T) {
 		{
 			name:         "credential URI for another provider is refused",
 			provider:     &fakeProvider{resp: bearerTokenResponse("s3cr3t")},
-			providerName: "vault", // policy URI is ate-secret://k8s/...
+			providerName: "vault",
 			want:         envoy_type.StatusCode_InternalServerError,
 		},
 		{
-			// A transient provider failure is retryable.
 			name:         "provider unavailable fails closed as retryable",
 			provider:     &fakeProvider{err: status.Error(codes.Unavailable, "provider down")},
 			providerName: injectionProviderName,
 			want:         envoy_type.StatusCode_ServiceUnavailable,
 		},
 		{
-			// A secret the provider does not hold cannot appear on retry.
 			name:         "secret not found denies as non-retryable",
 			provider:     &fakeProvider{err: status.Error(codes.NotFound, "no such secret")},
 			providerName: injectionProviderName,
@@ -221,7 +211,6 @@ func TestInjectionDenials(t *testing.T) {
 			want:         envoy_type.StatusCode_Forbidden,
 		},
 		{
-			// An unclassified error denies rather than inviting retries.
 			name:         "unexpected provider error denies",
 			provider:     &fakeProvider{err: errors.New("provider down")},
 			providerName: injectionProviderName,
@@ -252,48 +241,218 @@ func TestInjectionDenials(t *testing.T) {
 	}
 }
 
-func TestActorJWTInjectionNotImplemented(t *testing.T) {
+type jwtControlClient struct {
+	*egressMockClient
+	requests  []*ateapipb.MintActorJWTRequest
+	tokens    []string
+	err       error
+	wait      bool
+	deadline  time.Time
+	afterMint func()
+}
+
+func (c *jwtControlClient) MintActorJWT(ctx context.Context, req *ateapipb.MintActorJWTRequest, _ ...grpc.CallOption) (*ateapipb.MintActorJWTResponse, error) {
+	c.requests = append(c.requests, req)
+	c.deadline, _ = ctx.Deadline()
+	if c.wait {
+		<-ctx.Done()
+		return nil, status.FromContextError(ctx.Err()).Err()
+	}
+	if c.err != nil {
+		return nil, c.err
+	}
+	if c.afterMint != nil {
+		c.afterMint()
+	}
+	if c.tokens == nil {
+		return &ateapipb.MintActorJWTResponse{ActorJwt: c.actor.GetMetadata().GetUid() + "-jwt"}, nil
+	}
+	return &ateapipb.MintActorJWTResponse{ActorJwt: c.tokens[len(c.requests)-1]}, nil
+}
+
+func jwtInjectionPolicy(leg string, audiences []string) *ateapipb.EgressPolicy {
 	effects := &ateapipb.HttpRuleEffects{ReplaceHeaders: []*ateapipb.CredentialHeader{{
-		Header:   "authorization",
-		Prefix:   "Bearer ",
-		ActorJwt: &ateapipb.ActorJWTSource{Audiences: []string{"https://api.example.com"}, ExpirationSeconds: 900},
+		Header: "authorization", Prefix: "Bearer ", ActorJwt: &ateapipb.ActorJWTSource{Audiences: audiences, ExpirationSeconds: 900},
 	}}}
-	httpsPolicy := &ateapipb.EgressPolicy{Rules: []*ateapipb.EgressRule{{Https: &ateapipb.HTTPSRule{Hostnames: []string{"api.example.com"}, Effects: effects}}}}
-	httpPolicy := &ateapipb.EgressPolicy{Rules: []*ateapipb.EgressRule{{Http: &ateapipb.HTTPRule{Hostnames: []string{"api.example.com"}, Effects: effects}}}}
-	tests := []struct {
-		name     string
-		leg      string
-		policy   *ateapipb.EgressPolicy
-		provider *fakeProvider // nil means no provider configured
-	}{{
-		name:     "https rule",
-		leg:      extproc.EgressTLSMITMFilterChainName,
-		policy:   httpsPolicy,
-		provider: &fakeProvider{resp: bearerTokenResponse("s3cr3t")},
-	}, {
-		name:   "https rule without a provider",
-		leg:    extproc.EgressTLSMITMFilterChainName,
-		policy: httpsPolicy,
-	}, {
-		name:     "http rule",
-		leg:      extproc.EgressCleartextFilterChainName,
-		policy:   httpPolicy,
-		provider: &fakeProvider{resp: bearerTokenResponse("s3cr3t")},
-	}}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			var h *Handler
-			if tc.provider == nil {
-				h = injectionHandlerFor(tc.policy, nil, injectionProviderName)
-			} else {
-				h = injectionHandlerFor(tc.policy, tc.provider, injectionProviderName)
+	if leg == extproc.EgressCleartextFilterChainName {
+		return &ateapipb.EgressPolicy{Rules: []*ateapipb.EgressRule{{Http: &ateapipb.HTTPRule{Hostnames: []string{"api.example.com"}, Effects: effects}}}}
+	}
+	return &ateapipb.EgressPolicy{Rules: []*ateapipb.EgressRule{{Https: &ateapipb.HTTPSRule{Hostnames: []string{"api.example.com"}, Effects: effects}}}}
+}
+
+func TestActorJWTInjection(t *testing.T) {
+	maxAudiences := make([]string, 16)
+	for i := range maxAudiences {
+		maxAudiences[i] = fmt.Sprintf("https://api-%d.example.com", i)
+	}
+	for _, leg := range []string{extproc.EgressTLSMITMFilterChainName, extproc.EgressCleartextFilterChainName} {
+		for _, audiences := range [][]string{{"https://api.example.com"}, {"https://api.example.com", "https://other.example.com"}, maxAudiences} {
+			actor := runningActor()
+			actor.Metadata.Uid = "old-uid"
+			client := &jwtControlClient{egressMockClient: &egressMockClient{actor: actor, policy: jwtInjectionPolicy(leg, audiences)}}
+			h := New(client, nil, 0, nil, "")
+			md := withAuthorization(innerMetadata(leg, "GET", "api.example.com", nil))
+			for i, want := range []string{"Bearer old-uid-jwt", "Bearer new-uid-jwt"} {
+				if i == 1 {
+					client.actor.Metadata.Uid = "new-uid"
+				}
+				res, err := h.HandleRequestHeaders(context.Background(), md)
+				if err != nil {
+					t.Fatalf("request %d: %v", i, err)
+				}
+				got := res.Response.GetResponse().GetHeaderMutation().GetSetHeaders()
+				if len(got) != 1 || got[0].GetHeader().GetKey() != "authorization" || string(got[0].GetHeader().GetRawValue()) != want || got[0].GetAppendAction() != corev3.HeaderValueOption_OVERWRITE_IF_EXISTS_OR_ADD {
+					t.Fatalf("request %d mutation = %v, want authorization %q with overwrite", i, got, want)
+				}
 			}
-			_, err := h.HandleRequestHeaders(context.Background(),
-				withAuthorization(innerMetadata(tc.leg, "GET", "api.example.com", nil)))
-			wantStatus(t, err, envoy_type.StatusCode_NotImplemented)
-			if tc.provider != nil && tc.provider.got != nil {
-				t.Errorf("provider was asked for %v, want no fetch", tc.provider.got)
+			if len(client.requests) != 2 {
+				t.Fatalf("mint calls = %d, want 2 after same-name Actor recreation", len(client.requests))
+			}
+			for _, req := range client.requests {
+				if req.GetActor().GetAtespace() != "default" || req.GetActor().GetName() != "my-actor" || req.GetExpirationSeconds() != 900 || !slices.Equal(req.GetAudience(), audiences) {
+					t.Fatalf("mint request = %v, want actor default/my-actor, audiences %v, expiry 900", req, audiences)
+				}
+			}
+			if client.deadline.IsZero() || time.Until(client.deadline) > 4*time.Second {
+				t.Fatalf("mint deadline = %v, want within four seconds", client.deadline)
+			}
+		}
+	}
+}
+
+func TestActorJWTInjectionPrefix(t *testing.T) {
+	for _, tc := range []struct {
+		name, prefix, want string
+	}{
+		{"bearer", "Bearer ", "Bearer actor-jwt"},
+		{"empty", "", "actor-jwt"},
+		{"alternate", "Token ", "Token actor-jwt"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &jwtControlClient{egressMockClient: &egressMockClient{actor: runningActor()}, tokens: []string{"actor-jwt"}}
+			h := New(client, nil, 0, nil, "")
+			effects := &ateapipb.HttpRuleEffects{ReplaceHeaders: []*ateapipb.CredentialHeader{{
+				Header: "authorization", Prefix: tc.prefix,
+				ActorJwt: &ateapipb.ActorJWTSource{Audiences: []string{"https://api.example.com"}, ExpirationSeconds: 900},
+			}}}
+			got, err := h.applyEffects(context.Background(), testActorRef, egresspolicy.Destination{Hostname: "api.example.com"},
+				map[string]string{"authorization": "Bearer placeholder"}, effects)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != 1 || string(got[0].GetHeader().GetRawValue()) != tc.want {
+				t.Fatalf("mutations = %v, want one authorization header with %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestActorJWTSuccessAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client := &jwtControlClient{
+		egressMockClient: &egressMockClient{actor: runningActor()},
+		tokens:           []string{"actor-jwt"},
+		afterMint:        cancel,
+	}
+	provider := &fakeProvider{resp: bearerTokenResponse("provider-secret")}
+	h := New(client, nil, 0, provider, injectionProviderName)
+	effects := &ateapipb.HttpRuleEffects{ReplaceHeaders: []*ateapipb.CredentialHeader{
+		{Header: "authorization", Prefix: "Bearer ", ActorJwt: &ateapipb.ActorJWTSource{Audiences: []string{"https://api.example.com"}, ExpirationSeconds: 900}},
+		{Header: "x-next-jwt", ActorJwt: &ateapipb.ActorJWTSource{Audiences: []string{"https://api.example.com"}, ExpirationSeconds: 900}},
+		{Header: "x-provider", CredentialUri: "ate-secret://k8s/default/token"},
+	}}
+	mutations, err := h.applyEffects(ctx, testActorRef, egresspolicy.Destination{Hostname: "api.example.com"},
+		map[string]string{"authorization": "placeholder", "x-next-jwt": "placeholder", "x-provider": "placeholder"}, effects)
+	wantStatus(t, err, envoy_type.StatusCode_RequestTimeout)
+	if mutations != nil || len(client.requests) != 1 || provider.got != nil {
+		t.Fatalf("cancelled request returned mutations %v, mint calls %d, provider fetch %v", mutations, len(client.requests), provider.got)
+	}
+}
+
+func TestActorJWTAbsentHeaderDoesNotMint(t *testing.T) {
+	client := &jwtControlClient{egressMockClient: &egressMockClient{actor: runningActor(), policy: jwtInjectionPolicy(extproc.EgressTLSMITMFilterChainName, []string{"https://api.example.com"})}}
+	h := New(client, nil, 0, nil, "")
+	res, err := h.HandleRequestHeaders(context.Background(), innerMetadata(extproc.EgressTLSMITMFilterChainName, "GET", "api.example.com", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(client.requests) != 0 || len(res.Response.GetResponse().GetHeaderMutation().GetSetHeaders()) != 0 {
+		t.Fatalf("absent header minted %d times or mutated headers", len(client.requests))
+	}
+}
+
+func TestActorJWTMintFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		err       error
+		token     string
+		audiences []string
+		want      envoy_type.StatusCode
+		calls     int
+	}{
+		{"not found", status.Error(codes.NotFound, "missing"), "", []string{"https://api.example.com"}, envoy_type.StatusCode_Forbidden, 1},
+		{"permission denied", status.Error(codes.PermissionDenied, "denied"), "", []string{"https://api.example.com"}, envoy_type.StatusCode_Forbidden, 1},
+		{"unavailable", status.Error(codes.Unavailable, "down"), "", []string{"https://api.example.com"}, envoy_type.StatusCode_ServiceUnavailable, 1},
+		{"deadline", status.Error(codes.DeadlineExceeded, "late"), "", []string{"https://api.example.com"}, envoy_type.StatusCode_ServiceUnavailable, 1},
+		{"raw deadline", context.DeadlineExceeded, "", []string{"https://api.example.com"}, envoy_type.StatusCode_ServiceUnavailable, 1},
+		{"unexpected", errors.New("mint broke"), "", []string{"https://api.example.com"}, envoy_type.StatusCode_InternalServerError, 1},
+		{"empty token", nil, "", []string{"https://api.example.com"}, envoy_type.StatusCode_InternalServerError, 1},
+		{"bad token", nil, "secret\nvalue", []string{"https://api.example.com"}, envoy_type.StatusCode_InternalServerError, 1},
+		{"no audience", nil, "", nil, envoy_type.StatusCode_InternalServerError, 0},
+		{"duplicate audience", nil, "", []string{"same", "same"}, envoy_type.StatusCode_InternalServerError, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &jwtControlClient{egressMockClient: &egressMockClient{actor: runningActor(), policy: jwtInjectionPolicy(extproc.EgressTLSMITMFilterChainName, tc.audiences)}, tokens: []string{tc.token}, err: tc.err}
+			h := New(client, nil, 0, nil, "")
+			var logs bytes.Buffer
+			old := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			defer slog.SetDefault(old)
+			_, err := h.HandleRequestHeaders(context.Background(), withAuthorization(innerMetadata(extproc.EgressTLSMITMFilterChainName, "GET", "api.example.com", nil)))
+			wantStatus(t, err, tc.want)
+			if len(client.requests) != tc.calls {
+				t.Errorf("mint calls = %d, want %d", len(client.requests), tc.calls)
+			}
+			if strings.Contains(logs.String(), "secret\nvalue") || strings.Contains(logs.String(), "Bearer placeholder") || strings.Contains(logs.String(), "mint broke") {
+				t.Errorf("credential or backend text leaked into logs: %q", logs.String())
+			}
+		})
+	}
+}
+
+func TestActorJWTTooManyAudiences(t *testing.T) {
+	audiences := make([]string, 17)
+	for i := range audiences {
+		audiences[i] = fmt.Sprintf("https://api-%d.example.com", i)
+	}
+	client := &jwtControlClient{egressMockClient: &egressMockClient{actor: runningActor(), policy: jwtInjectionPolicy(extproc.EgressTLSMITMFilterChainName, audiences)}}
+	h := New(client, nil, 0, nil, "")
+	_, err := h.HandleRequestHeaders(context.Background(), withAuthorization(innerMetadata(extproc.EgressTLSMITMFilterChainName, "GET", "api.example.com", nil)))
+	wantStatus(t, err, envoy_type.StatusCode_InternalServerError)
+	if len(client.requests) != 0 {
+		t.Fatalf("mint calls = %d, want none for invalid policy", len(client.requests))
+	}
+}
+
+func TestActorJWTMintCancellation(t *testing.T) {
+	client := &jwtControlClient{egressMockClient: &egressMockClient{actor: runningActor(), policy: jwtInjectionPolicy(extproc.EgressTLSMITMFilterChainName, []string{"https://api.example.com"})}, wait: true}
+	h := New(client, nil, 0, nil, "")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	_, err := h.HandleRequestHeaders(ctx, withAuthorization(innerMetadata(extproc.EgressTLSMITMFilterChainName, "GET", "api.example.com", nil)))
+	wantStatus(t, err, envoy_type.StatusCode_RequestTimeout)
+	if len(client.requests) != 1 {
+		t.Fatalf("mint calls = %d, want 1", len(client.requests))
+	}
+}
+
+func TestActorJWTMintTimeout(t *testing.T) {
+	client := &jwtControlClient{egressMockClient: &egressMockClient{actor: runningActor(), policy: jwtInjectionPolicy(extproc.EgressTLSMITMFilterChainName, []string{"https://api.example.com"})}, wait: true}
+	h := New(client, nil, 0, nil, "")
+	_, err := h.HandleRequestHeaders(context.Background(), withAuthorization(innerMetadata(extproc.EgressTLSMITMFilterChainName, "GET", "api.example.com", nil)))
+	wantStatus(t, err, envoy_type.StatusCode_ServiceUnavailable)
+	if len(client.requests) != 1 {
+		t.Fatalf("mint calls = %d, want 1", len(client.requests))
 	}
 }
