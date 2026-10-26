@@ -17,10 +17,24 @@ package authz
 import (
 	"testing"
 
+	"github.com/agent-substrate/substrate/internal/principal"
 	"github.com/google/go-cmp/cmp"
 	openfgav1 "github.com/openfga/api/proto/openfga/v1"
 	"google.golang.org/protobuf/testing/protocmp"
 )
+
+func TestComponentGrantsRequireMTLS(t *testing.T) {
+	id := "spiffe://cluster.local/ns/ate-system/sa/atenet-egress"
+	user := formatUser(id)
+	a := &Authorizer{systemPrincipals: map[string][]string{user: {RoleEgressGateway}}}
+	if got := a.componentGrants(principal.PrincipalInfo{ID: id, Kind: principal.KindJWT}); got != nil {
+		t.Errorf("JWT with matching subject received component grant: %v", got)
+	}
+	want := []*openfgav1.TupleKey{{User: user, Relation: RoleEgressGateway, Object: GlobalRootObject}}
+	if diff := cmp.Diff(want, a.componentGrants(principal.PrincipalInfo{ID: id, Kind: principal.KindMTLS}), protocmp.Transform()); diff != "" {
+		t.Errorf("mTLS grant mismatch (-want +got):\n%s", diff)
+	}
+}
 
 func TestContextualTuples(t *testing.T) {
 	parentGlobal := func(atespace string) *openfgav1.TupleKey {
@@ -46,6 +60,11 @@ func TestContextualTuples(t *testing.T) {
 			want:   []*openfgav1.TupleKey{parentGlobal("atespace:team-a")},
 		},
 		{
+			name:   "worker",
+			object: WorkerObject("worker-1"),
+			want:   []*openfgav1.TupleKey{parentGlobal("worker:worker-1")},
+		},
+		{
 			name:   "actor",
 			object: ActorObject("team-a", "runner"),
 			want: []*openfgav1.TupleKey{
@@ -59,6 +78,14 @@ func TestContextualTuples(t *testing.T) {
 			want: []*openfgav1.TupleKey{
 				parentAtespace("atespace:shared", "actor_template:shared/tmpl"),
 				parentGlobal("atespace:shared"),
+			},
+		},
+		{
+			name:   "tag",
+			object: TagObject("team-a", "snapshot"),
+			want: []*openfgav1.TupleKey{
+				parentAtespace("atespace:team-a", "tag:team-a/snapshot"),
+				parentGlobal("atespace:team-a"),
 			},
 		},
 		{

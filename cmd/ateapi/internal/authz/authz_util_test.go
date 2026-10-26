@@ -17,8 +17,37 @@ package authz
 import (
 	"testing"
 
+	"github.com/agent-substrate/substrate/internal/installdefaults"
 	"github.com/google/go-cmp/cmp"
 )
+
+func TestParseSystemPrincipals(t *testing.T) {
+	ns := "ate-system"
+	ids := SystemPrincipals{
+		ControllerSPIFFEID:       installdefaults.SPIFFEID(ns, "ate-controller"),
+		EgressGatewaySPIFFEID:    installdefaults.EgressSPIFFEID(ns),
+		IngressRouterSPIFFEID:    installdefaults.RouterSPIFFEID(ns),
+		AteletSPIFFEID:           installdefaults.AteletSPIFFEID(ns),
+		APIServerSidecarSPIFFEID: installdefaults.SPIFFEID(ns, "ate-api-server"),
+	}
+	got, err := parseSystemPrincipals(ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][]string{
+		formatUser(ids.ControllerSPIFFEID):       {RoleController},
+		formatUser(ids.EgressGatewaySPIFFEID):    {RoleEgressGateway},
+		formatUser(ids.IngressRouterSPIFFEID):    {RoleIngressRouter},
+		formatUser(ids.AteletSPIFFEID):           {RoleAtelet},
+		formatUser(ids.APIServerSidecarSPIFFEID): {RoleAPIServerSidecar},
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("system roles mismatch (-want +got):\n%s", diff)
+	}
+	if _, err := parseSystemPrincipals(SystemPrincipals{EgressGatewaySPIFFEID: "not-a-spiffe-id"}); err == nil {
+		t.Error("invalid SPIFFE ID accepted")
+	}
+}
 
 func TestFormatMember(t *testing.T) {
 	tests := []struct {

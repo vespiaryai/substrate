@@ -36,7 +36,8 @@ type Authorizer struct {
 	// on every Check rather than a stored tuple, so they are not part of any
 	// AccessPolicy, cannot be revoked through the API, and lose access once
 	// the server runs without them in its configuration.
-	bootstrapOwners map[string]struct{}
+	bootstrapOwners  map[string]struct{}
+	systemPrincipals map[string][]string
 }
 
 // Check verifies that the principal in ctx has relation on object.
@@ -56,7 +57,7 @@ func (a *Authorizer) Check(ctx context.Context, relation, object string) error {
 		return apierror.Unauthenticated("unauthenticated: missing principal in context")
 	}
 	user := formatUser(p.ID)
-	allowed, err := a.checkRaw(ctx, user, relation, object)
+	allowed, err := a.checkRaw(ctx, user, relation, object, a.componentGrants(p)...)
 	if err != nil {
 		return err
 	}
@@ -66,8 +67,20 @@ func (a *Authorizer) Check(ctx context.Context, relation, object string) error {
 	return nil
 }
 
-func (a *Authorizer) checkRaw(ctx context.Context, user, relation, object string) (bool, error) {
-	tuples := contextualTuples(object)
+func (a *Authorizer) componentGrants(p principal.PrincipalInfo) []*openfgav1.TupleKey {
+	if p.Kind != principal.KindMTLS {
+		return nil
+	}
+	user := formatUser(p.ID)
+	var grants []*openfgav1.TupleKey
+	for _, role := range a.systemPrincipals[user] {
+		grants = append(grants, &openfgav1.TupleKey{User: user, Relation: role, Object: GlobalRootObject})
+	}
+	return grants
+}
+
+func (a *Authorizer) checkRaw(ctx context.Context, user, relation, object string, grants ...*openfgav1.TupleKey) (bool, error) {
+	tuples := append(contextualTuples(object), grants...)
 	// A Check only evaluates the caller, so only the caller's own bootstrap
 	// grant can affect the result.
 	if _, ok := a.bootstrapOwners[user]; ok {
@@ -115,9 +128,9 @@ func (a *Authorizer) checkRaw(ctx context.Context, user, relation, object string
 func contextualTuples(object string) []*openfgav1.TupleKey {
 	objectType, id, _ := strings.Cut(object, ":")
 	switch objectType {
-	case "atespace":
+	case "atespace", "worker":
 		return []*openfgav1.TupleKey{parentGlobalTuple(object)}
-	case "actor", "actor_template":
+	case "actor", "actor_template", "tag":
 		atespace, _, ok := strings.Cut(id, "/")
 		if !ok {
 			return nil

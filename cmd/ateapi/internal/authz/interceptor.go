@@ -22,16 +22,25 @@ import (
 	"google.golang.org/grpc"
 )
 
-// UnaryServerInterceptor returns a gRPC unary interceptor that enforces per-RPC
-// permissions registered in defaultRPCPermissions using authorizer. When
-// enforce is false, only rules marked alwaysEnforce are checked.
-func UnaryServerInterceptor(authorizer *Authorizer, enforce bool) grpc.UnaryServerInterceptor {
+type permissionChecker interface {
+	Check(context.Context, string, string) error
+}
+
+// UnaryServerInterceptor enforces registered RPC permissions. When enforcement
+// is off, it still checks AccessPolicy governance methods.
+func UnaryServerInterceptor(authorizer permissionChecker, enforce bool) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		if IsBypassed(ctx) {
 			return handler(ctx, req)
 		}
 		rule, registered := defaultRPCPermissions[info.FullMethod]
-		if !registered || (!enforce && !rule.alwaysEnforce) {
+		if !enforce && (!registered || !rule.alwaysEnforce) {
+			return handler(ctx, req)
+		}
+		if !registered {
+			return nil, apierror.PermissionDenied("permission denied: unregistered RPC %q", info.FullMethod)
+		}
+		if rule.authorizedInHandler != "" {
 			return handler(ctx, req)
 		}
 

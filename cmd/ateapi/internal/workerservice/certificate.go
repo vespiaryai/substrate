@@ -39,14 +39,10 @@ func (s *Server) MintAteomActorCertificate(ctx context.Context, req *ateapipb.Mi
 	}
 
 	// TODO(identity): This check should be handled by OpenFGA.
-	if _, err := ateletauth.Authenticate(ctx, s.ateletSPIFFEID); err != nil {
+	caller, err := ateletauth.Authenticate(ctx, s.ateletSPIFFEID)
+	if err != nil {
 		return nil, err
 	}
-
-	// TODO(authz): Authorization layer needs to check whether the caller has
-	// the mintActorCertificate permission/relation with this actor.    This
-	// could be an atelet (via the relationship of the atelet running the
-	// actor), or the egress gateway (via a cluster-level grant?)
 
 	// Verify that this actor exists in the store. It doesn't need to be
 	// running, since we may need to issue certificates during actor boot / resume.
@@ -58,6 +54,12 @@ func (s *Server) MintAteomActorCertificate(ctx context.Context, req *ateapipb.Mi
 	}
 	if dbActor.GetMetadata().GetUid() != req.GetActorUid() {
 		return nil, apierror.Aborted("conflict; actor has been deleted and recreated")
+	}
+	// The stored assignment is the control plane's placement decision. An
+	// unassigned Actor has no node authorized to mint its worker identity.
+	assignment := dbActor.GetStatus().GetWorkerAssignment()
+	if assignment.GetWorker().GetName() == "" || assignment.GetNodeName() == "" || assignment.GetNodeName() != caller.NodeName {
+		return nil, apierror.NotFound("actor not found")
 	}
 
 	// Parse the CSR.

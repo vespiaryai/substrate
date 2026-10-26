@@ -59,6 +59,10 @@ func newFakeStoreWithActor(atespace, name, uid string) (*fakeActorStore, *ateapi
 		},
 		Status: &ateapipb.ActorStatus{
 			State: ateapipb.ActorState_ACTOR_STATE_RUNNING,
+			WorkerAssignment: &ateapipb.WorkerAssignment{
+				Worker:   &ateapipb.ObjectRef{Name: "worker-1"},
+				NodeName: "node-1",
+			},
 		},
 	}
 	return &fakeActorStore{
@@ -137,6 +141,35 @@ func TestMintAteomActorCertificate(t *testing.T) {
 	}
 	if identity != nil {
 		t.Errorf("ActorIdentity = %+v, want nil (ateom certificates should not carry ActorIdentity)", identity)
+	}
+}
+
+func TestMintAteomActorCertificate_OnlyAssignedNode(t *testing.T) {
+	st, actor := newFakeStoreWithActor("team-a", "my-actor", "3b9f1e77-2c4d-4a80-91be-6d5c8f0a7e21")
+	s := New(st, &fakeSuspender{}, testAteletSPIFFEID, newTestCAPool(t))
+	csr, _ := generateTestCSR(t)
+	req := &ateapipb.MintAteomActorCertificateRequest{
+		Actor:                     &ateapipb.ObjectRef{Atespace: "team-a", Name: "my-actor"},
+		ActorUid:                  actor.GetMetadata().GetUid(),
+		CertificateSigningRequest: csr,
+	}
+	for _, tc := range []struct {
+		name       string
+		node       string
+		assignment *ateapipb.WorkerAssignment
+	}{
+		{"other node", "node-2", actor.GetStatus().GetWorkerAssignment()},
+		{"unassigned actor", "node-1", nil},
+		{"assignment without worker", "node-1", &ateapipb.WorkerAssignment{NodeName: "node-1"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			actor.Status.WorkerAssignment = tc.assignment
+			ctx := ateletauthtest.ContextWith(ateletauthtest.CertOn(t, tc.node))
+			_, err := s.MintAteomActorCertificate(ctx, req)
+			if got := apierror.Code(err); got != codes.NotFound {
+				t.Fatalf("code = %v (err %v), want NotFound", got, err)
+			}
+		})
 	}
 }
 

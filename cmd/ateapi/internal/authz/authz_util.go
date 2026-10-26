@@ -28,6 +28,7 @@ import (
 	"github.com/openfga/openfga/pkg/server"
 	"github.com/openfga/openfga/pkg/storage/postgres"
 	"github.com/openfga/openfga/pkg/storage/sqlcommon"
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
@@ -39,24 +40,44 @@ const (
 	// GlobalRootObject is the singleton global scope object identifier in OpenFGA.
 	GlobalRootObject = "global:root"
 
-	RoleOwner  = "owner"
-	RoleEditor = "editor"
-	RoleViewer = "viewer"
+	RoleOwner            = "owner"
+	RoleEditor           = "editor"
+	RoleViewer           = "viewer"
+	RoleController       = "controller"
+	RoleEgressGateway    = "egress_gateway"
+	RoleIngressRouter    = "ingress_router"
+	RoleAtelet           = "atelet"
+	RoleAPIServerSidecar = "api_server_sidecar"
 
-	RelationCanCreateAtespace      = "can_create_atespace"
-	RelationCanListAtespaces       = "can_list_atespaces"
-	RelationCanCreateActor         = "can_create_actor"
-	RelationCanListActors          = "can_list_actors"
-	RelationCanCreateActorTemplate = "can_create_actor_template"
-	RelationCanListActorTemplates  = "can_list_actor_templates"
-	RelationCanGet                 = "can_get"
-	RelationCanUseTemplate         = "can_use_template"
-	RelationCanUpdate              = "can_update"
-	RelationCanDelete              = "can_delete"
-	RelationCanCreateAccessPolicy  = "can_create_access_policy"
-	RelationCanGetAccessPolicy     = "can_get_access_policy"
-	RelationCanUpdateAccessPolicy  = "can_update_access_policy"
-	RelationCanDeleteAccessPolicy  = "can_delete_access_policy"
+	RelationCanCreateAtespace       = "can_create_atespace"
+	RelationCanListAtespaces        = "can_list_atespaces"
+	RelationCanCreateActor          = "can_create_actor"
+	RelationCanListActors           = "can_list_actors"
+	RelationCanCreateActorTemplate  = "can_create_actor_template"
+	RelationCanListActorTemplates   = "can_list_actor_templates"
+	RelationCanGet                  = "can_get"
+	RelationCanUseTemplate          = "can_use_template"
+	RelationCanUpdate               = "can_update"
+	RelationCanDelete               = "can_delete"
+	RelationCanCreateAccessPolicy   = "can_create_access_policy"
+	RelationCanGetAccessPolicy      = "can_get_access_policy"
+	RelationCanUpdateAccessPolicy   = "can_update_access_policy"
+	RelationCanDeleteAccessPolicy   = "can_delete_access_policy"
+	RelationCanCreateWorker         = "can_create_worker"
+	RelationCanListWorkers          = "can_list_workers"
+	RelationCanDrain                = "can_drain"
+	RelationCanListActorAssignments = "can_list_actor_assignments"
+	RelationCanResume               = "can_resume"
+	RelationCanSuspend              = "can_suspend"
+	RelationCanRevert               = "can_revert"
+	RelationCanGetEgressPolicy      = "can_get_egress_policy"
+	RelationCanCreateEgressPolicy   = "can_create_egress_policy"
+	RelationCanUpdateEgressPolicy   = "can_update_egress_policy"
+	RelationCanDeleteEgressPolicy   = "can_delete_egress_policy"
+	RelationCanCreateTag            = "can_create_tag"
+	RelationCanListTags             = "can_list_tags"
+	RelationCanMintActorJWT         = "can_mint_actor_jwt"
+	RelationCanMintActorCertificate = "can_mint_actor_certificate"
 
 	// maxTuplesPerWrite is OpenFGA's default maximum number of tuples allowed in a single Write request.
 	maxTuplesPerWrite = 100
@@ -98,6 +119,14 @@ var objectIDReplacer = strings.NewReplacer(
 // AtespaceObject formats an atespace name as an OpenFGA object string.
 func AtespaceObject(name string) string {
 	return "atespace:" + objectIDReplacer.Replace(name)
+}
+
+func WorkerObject(name string) string {
+	return "worker:" + objectIDReplacer.Replace(name)
+}
+
+func TagObject(atespace, name string) string {
+	return "tag:" + atespacedID(atespace, name)
 }
 
 // ActorObject formats an actor as an OpenFGA object string.
@@ -194,25 +223,40 @@ func EnsureStoreAndModel(ctx context.Context, pool *pgxpool.Pool, fgaServer *ser
 	return storeID, modelID, nil
 }
 
-// New provisions the default OpenFGA store and authorization model via
-// EnsureStoreAndModel and returns the read-path Authorizer and write-path
-// PolicyManager. bootstrapOwners are principal IDs (with or without the
-// "user:" prefix) that the Authorizer treats as owners of global:root on every
-// check, independent of any stored AccessPolicy.
-func New(ctx context.Context, pool *pgxpool.Pool, fgaServer *server.Server, bootstrapOwners []string) (*Authorizer, *PolicyManager, error) {
+// SystemPrincipals binds the verified mTLS identities of system components to
+// their authorization roles. Empty identities receive no grant.
+type SystemPrincipals struct {
+	ControllerSPIFFEID       string
+	EgressGatewaySPIFFEID    string
+	IngressRouterSPIFFEID    string
+	AteletSPIFFEID           string
+	APIServerSidecarSPIFFEID string
+}
+
+// New provisions the OpenFGA model and returns its authorizer and policy
+// manager. If system identities are omitted, no component roles are granted.
+func New(ctx context.Context, pool *pgxpool.Pool, fgaServer *server.Server, bootstrapOwners []string, system ...SystemPrincipals) (*Authorizer, *PolicyManager, error) {
 	owners, err := parseBootstrapOwners(bootstrapOwners)
 	if err != nil {
 		return nil, nil, err
+	}
+	var systemPrincipals map[string][]string
+	if len(system) > 0 {
+		systemPrincipals, err = parseSystemPrincipals(system[0])
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	storeID, modelID, err := EnsureStoreAndModel(ctx, pool, fgaServer)
 	if err != nil {
 		return nil, nil, err
 	}
 	authorizer := &Authorizer{
-		fgaServer:       fgaServer,
-		storeID:         storeID,
-		modelID:         modelID,
-		bootstrapOwners: owners,
+		fgaServer:        fgaServer,
+		storeID:          storeID,
+		modelID:          modelID,
+		bootstrapOwners:  owners,
+		systemPrincipals: systemPrincipals,
 	}
 	policyManager := &PolicyManager{
 		fgaServer: fgaServer,
@@ -220,6 +264,27 @@ func New(ctx context.Context, pool *pgxpool.Pool, fgaServer *server.Server, boot
 		modelID:   modelID,
 	}
 	return authorizer, policyManager, nil
+}
+
+func parseSystemPrincipals(system SystemPrincipals) (map[string][]string, error) {
+	bindings := []struct{ role, id string }{
+		{RoleController, system.ControllerSPIFFEID},
+		{RoleEgressGateway, system.EgressGatewaySPIFFEID},
+		{RoleIngressRouter, system.IngressRouterSPIFFEID},
+		{RoleAtelet, system.AteletSPIFFEID},
+		{RoleAPIServerSidecar, system.APIServerSidecarSPIFFEID},
+	}
+	out := make(map[string][]string, len(bindings))
+	for _, binding := range bindings {
+		if binding.id == "" {
+			continue
+		}
+		if _, err := spiffeid.FromString(binding.id); err != nil {
+			return nil, fmt.Errorf("invalid %s SPIFFE ID %q: %w", binding.role, binding.id, err)
+		}
+		out[formatUser(binding.id)] = append(out[formatUser(binding.id)], binding.role)
+	}
+	return out, nil
 }
 
 // parseBootstrapOwners validates principal IDs and returns the set of their

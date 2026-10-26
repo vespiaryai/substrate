@@ -69,6 +69,30 @@ tuples:
   - user: user:sa-runner-1
     relation: can_revert
     object: actor:runner-1
+  - user: atespace:space-1
+    relation: parent_atespace
+    object: actor:runner-2
+  - user: user:scoped
+    relation: can_resume
+    object: actor:runner-1
+  - user: user:scoped
+    relation: can_mint_actor_jwt
+    object: actor:runner-1
+  - user: user:egress
+    relation: egress_gateway
+    object: global:root
+  - user: user:router
+    relation: ingress_router
+    object: global:root
+  - user: user:controller
+    relation: controller
+    object: global:root
+  - user: user:atelet
+    relation: atelet
+    object: global:root
+  - user: global:root
+    relation: parent_global
+    object: worker:pod-1
 
 tests:
   - name: 1. Global Superadmin & Viewer Propagation
@@ -296,3 +320,51 @@ tests:
         object: actor:runner-1
         assertions:
           can_mint_ateom_actor_credential: false
+
+  - name: 6. Actor credentials and component grants
+    check:
+      - user: user:scoped
+        object: actor:runner-1
+        assertions:
+          can_resume: true
+          can_mint_actor_jwt: true
+      - user: user:scoped
+        object: actor:runner-2
+        assertions:
+          can_resume: false
+          can_mint_actor_jwt: false
+      - user: user:bob
+        object: actor:runner-1
+        assertions:
+          can_mint_actor_jwt: false
+          can_mint_actor_certificate: false
+      - user: user:egress
+        object: actor:runner-1
+        assertions:
+          can_get: true
+          can_get_egress_policy: true
+          can_mint_actor_jwt: true
+          can_mint_actor_certificate: true
+          can_resume: false
+      - user: user:router
+        object: actor:runner-1
+        assertions:
+          can_resume: true
+          can_mint_actor_jwt: false
+      - user: user:atelet
+        object: actor:runner-1
+        assertions:
+          can_get_egress_policy: true
+          can_mint_actor_jwt: false
+      - user: user:controller
+        object: global:root
+        assertions:
+          can_create_worker: true
+          can_list_workers: true
+      - user: user:controller
+        object: worker:pod-1
+        assertions:
+          can_get: true
+          can_update: true
+          can_drain: true
+          can_list_actor_assignments: true

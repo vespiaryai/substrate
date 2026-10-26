@@ -547,11 +547,6 @@ func (s *RPCService) MintActorJWT(ctx context.Context, req *ateapipb.MintActorJW
 		return nil, apierror.InvalidArgument("%v", errs.ToAggregate())
 	}
 
-	// TODO(authz): Authorization layer needs to check whether the caller has
-	// the mintActorJWT permission/relation with this actor.  This could be an
-	// atelet (via the relationship of the atelet running the actor), or the
-	// egress gateway (via a cluster-level grant?)
-
 	// Verify that this actor exists in the store.  It doesn't need to be
 	// running, since we may need to issue JWTs during actor boot / resume.
 	dbActor, err := s.impl.GetActor(ctx, resources.ActorRefFromObjectRef(req.GetActor()))
@@ -601,11 +596,6 @@ func (s *RPCService) MintActorCertificate(ctx context.Context, req *ateapipb.Min
 	if errs := apivalidation.ValidateMintActorCertificateRequest(ctx, req); len(errs) > 0 {
 		return nil, apierror.InvalidArgument("%v", errs.ToAggregate())
 	}
-
-	// TODO(authz): Authorization layer needs to check whether the caller has
-	// the mintActorCertificate permission/relation with this actor.    This
-	// could be an atelet (via the relationship of the atelet running the
-	// actor), or the egress gateway (via a cluster-level grant?)
 
 	// Check that the caller authenticated with a client certificate --- we
 	// should not allow bootstrapping a proof-of-possession credential from a

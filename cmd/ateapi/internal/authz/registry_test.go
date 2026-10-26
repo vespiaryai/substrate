@@ -316,6 +316,9 @@ func TestDefaultRPCPermissions_MalformedIdentifierFailsClosed(t *testing.T) {
 
 func TestDefaultRPCPermissions_UnexpectedRequestTypeFailsClosed(t *testing.T) {
 	for fullMethod, r := range defaultRPCPermissions {
+		if r.extract == nil {
+			continue
+		}
 		if _, err := r.extract("wrong-type"); apierror.Code(err) != codes.Internal {
 			t.Errorf("%s: extract(wrong type) error = %v, want code Internal", fullMethod, err)
 		}
