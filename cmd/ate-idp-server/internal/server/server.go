@@ -28,7 +28,6 @@ import (
 )
 
 // KeySource supplies the verification keys to publish.
-// *localjwtauthority.RefreshingPool is one.
 type KeySource interface {
 	VerificationKeys() ([]*localjwtauthority.VerificationKey, error)
 }

@@ -37,7 +37,6 @@ import (
 	"github.com/agent-substrate/substrate/internal/localjwtauthority"
 )
 
-// fakeKeys is a KeySource whose keys and error a test can change.
 type fakeKeys struct {
 	mu   sync.Mutex
 	keys []*localjwtauthority.VerificationKey
@@ -56,7 +55,6 @@ func (f *fakeKeys) set(keys []*localjwtauthority.VerificationKey, err error) {
 	f.keys, f.err = keys, err
 }
 
-// verificationKeys generates one key per algorithm.
 func verificationKeys(t *testing.T, algorithms ...string) []*localjwtauthority.VerificationKey {
 	t.Helper()
 	pool := &localjwtauthority.ConcretePool{}

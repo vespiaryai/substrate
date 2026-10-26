@@ -108,7 +108,6 @@ func run(ctx context.Context) error {
 	return httpSrv.Shutdown(shutdownCtx)
 }
 
-// missingFlags returns the sorted names of the flags whose values are empty.
 func missingFlags(flags map[string]string) []string {
 	var missing []string
 	for name, value := range flags {
