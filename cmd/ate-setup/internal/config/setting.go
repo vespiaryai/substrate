@@ -85,6 +85,7 @@ var Registry = []Setting{
 	{Key: "k3s.s3Endpoint", Env: "ATE_K3S_S3_ENDPOINT", Flag: "k3s-s3-endpoint", Kind: KindString, Usage: "HTTPS endpoint for an existing S3 snapshot service"},
 	{Key: "k3s.s3Region", Env: "ATE_K3S_S3_REGION", Flag: "k3s-s3-region", Kind: KindString, Usage: "S3 snapshot service region"},
 	{Key: "k3s.s3Secret", Env: "ATE_K3S_S3_SECRET", Flag: "k3s-s3-secret", Kind: KindString, Usage: "Existing ate-system Secret with AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY"},
+	{Key: "k3s.s3CAFile", Env: "ATE_K3S_S3_CA_FILE", Flag: "k3s-s3-ca-file", Kind: KindString, Usage: "Absolute path to a public PEM certificate bundle for the k3s S3 endpoint"},
 	{Key: "k3s.snapshotController", Env: "ATE_K3S_SNAPSHOT_CONTROLLER", Flag: "k3s-snapshot-controller", Kind: KindString, Usage: "Existing upstream snapshot-controller deployment as namespace/name"},
 	{Key: "k3s.snapshotControllerUID", Env: "ATE_K3S_SNAPSHOT_CONTROLLER_UID", Flag: "k3s-snapshot-controller-uid", Kind: KindString, Usage: "Expected existing snapshot-controller deployment UID"},
 	{Key: "k3s.enabled", Env: "ATE_INSTALL_K3S", Flag: "k3s", Kind: KindBool, Default: "false", Usage: "Target an explicitly bound single-node k3s installation"},

@@ -17,9 +17,12 @@ The profile requires explicit kubeconfig, context, node name, node UID, kube-sys
 | `--k3s-s3-endpoint` | An existing S3-compatible HTTPS endpoint |
 | `--k3s-s3-region` | The endpoint's region |
 | `--k3s-s3-secret` | An existing ate-system Secret with `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` |
+| `--k3s-s3-ca-file` | Optional absolute path to a public PEM certificate bundle for the S3 endpoint |
 | `--storage-bucket-name` | An existing snapshot bucket |
 
-The installer references the snapshot Secret without reading or creating it. Both ate-api-server and atelet use the same explicit S3 settings. No GCS credentials, local RustFS demo credentials, or plaintext storage proxy enter this profile. The HTTPS endpoint must have a certificate trusted by the shipped images. Private registry credentials still need an explicit supported configuration. The profile removes GKE's host credential-provider mounts without installing a replacement.
+The installer references the snapshot Secret without reading or creating it. Both ate-api-server and atelet use the same explicit S3 settings. No GCS credentials, local RustFS demo credentials, or plaintext storage proxy enter this profile. Without a CA file, the HTTPS endpoint must have a certificate trusted by the shipped images. Private registry credentials still need an explicit supported configuration. The profile removes GKE's host credential-provider mounts without installing a replacement.
+
+With a CA file, the installer validates one public PEM snapshot before cluster writes and creates `ate-system/ate-s3-ca`. Both clients mount the ConfigMap read-only and set `AWS_CA_BUNDLE` to its certificate file. The bundle replaces their default AWS root pool, so include every root those clients need. The host file must contain certificates only, never a private key or credentials. A changed bundle requires a reviewed full `deploy ate-system` run to update both pod templates. Standalone component deploys accept unchanged bytes but refuse a changed shared bundle. A full deploy has other setup effects and is not an automatic rotation command.
 
 The API server must expose `certificates.k8s.io/v1beta1` PodCertificateRequests and ClusterTrustBundles. The kubelet must enable pod certificate and trust bundle projections. API discovery proves exposure, not successful certificate issuance or kubelet projection. Live qualification must prove both. The installer does not alter k3s feature gates or configuration.
 

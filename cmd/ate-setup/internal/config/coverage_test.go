@@ -101,6 +101,8 @@ func valueFor(key string) string {
 		return "ES256"
 	case "csi.setup":
 		return "none"
+	case "k3s.s3CAFile":
+		return ""
 	}
 	return "set"
 }

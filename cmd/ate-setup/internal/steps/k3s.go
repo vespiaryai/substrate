@@ -428,6 +428,14 @@ func (e *Env) configureK3sManifest(manifest []byte) ([]byte, error) {
 			if container["name"] != "atelet" && container["name"] != "ate-api-server" {
 				continue
 			}
+			if e.s3CA != nil && isK3sS3CATarget(obj, container) {
+				if obj.GetNamespace() != e.Namespace() {
+					return nil, fmt.Errorf("%s/%s must be in namespace %s for the S3 CA projection", obj.GetKind(), obj.GetName(), e.Namespace())
+				}
+				if err := addK3sS3CAProjection(obj, container, e.s3CA); err != nil {
+					return nil, fmt.Errorf("%s/%s: %w", obj.GetKind(), obj.GetName(), err)
+				}
+			}
 			env, _ := container["env"].([]interface{})
 			for _, pair := range [][2]string{{"ATE_STORAGE_BACKEND", "s3"}, {"AWS_ENDPOINT_URL", p.S3Endpoint}, {"AWS_REGION", p.S3Region}, {"AWS_S3_USE_PATH_STYLE", "true"}, {"AWS_EC2_METADATA_DISABLED", "true"}} {
 				env = setK3sEnv(env, map[string]interface{}{"name": pair[0], "value": pair[1]})
