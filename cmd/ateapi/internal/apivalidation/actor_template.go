@@ -62,8 +62,6 @@ func ValidateActorTemplateUpdate(ctx context.Context, fldPath *field.Path, newVa
 	return Validate_ActorTemplate(ctx, op, fldPath, newVal, oldVal)
 }
 
-// ValidateCustom_CreateActorTemplateRequest_ActorTemplate rejects invalid
-// container names and mounts that reference undeclared volumes.
 func ValidateCustom_CreateActorTemplateRequest_ActorTemplate(_ context.Context, _ operation.Operation, fldPath *field.Path, value, _ *ateapipb.ActorTemplate) field.ErrorList {
 	names := make([]string, len(value.GetContainers()))
 	for i, ctr := range value.GetContainers() {
