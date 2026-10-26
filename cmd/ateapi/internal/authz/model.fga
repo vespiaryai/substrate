@@ -130,7 +130,7 @@ type actor
     define can_update_egress_policy: editor from parent_atespace
     define can_delete_egress_policy: editor from parent_atespace
     define can_mint_actor_jwt: [user] or egress_gateway from parent_atespace
-    define can_mint_actor_certificate: [user] or egress_gateway from parent_atespace
+    define can_mint_actor_certificate: [user]
 
     # --- Hardened System & Infrastructure Operations ---
 

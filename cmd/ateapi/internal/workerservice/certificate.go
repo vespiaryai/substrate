@@ -38,7 +38,6 @@ func (s *Server) MintAteomActorCertificate(ctx context.Context, req *ateapipb.Mi
 		return nil, resources.ToAPIError(errs)
 	}
 
-	// TODO(identity): This check should be handled by OpenFGA.
 	caller, err := ateletauth.Authenticate(ctx, s.ateletSPIFFEID)
 	if err != nil {
 		return nil, err
@@ -52,14 +51,12 @@ func (s *Server) MintAteomActorCertificate(ctx context.Context, req *ateapipb.Mi
 	} else if err != nil {
 		return nil, fmt.Errorf("while retrieving actor: %w", err)
 	}
-	if dbActor.GetMetadata().GetUid() != req.GetActorUid() {
-		return nil, apierror.Aborted("conflict; actor has been deleted and recreated")
-	}
-	// The stored assignment is the control plane's placement decision. An
-	// unassigned Actor has no node authorized to mint its worker identity.
 	assignment := dbActor.GetStatus().GetWorkerAssignment()
 	if assignment.GetWorker().GetName() == "" || assignment.GetNodeName() == "" || assignment.GetNodeName() != caller.NodeName {
 		return nil, apierror.NotFound("actor not found")
+	}
+	if dbActor.GetMetadata().GetUid() != req.GetActorUid() {
+		return nil, apierror.Aborted("conflict; actor has been deleted and recreated")
 	}
 
 	// Parse the CSR.

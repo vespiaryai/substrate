@@ -78,6 +78,9 @@ tuples:
   - user: user:scoped
     relation: can_mint_actor_jwt
     object: actor:runner-1
+  - user: user:scoped
+    relation: can_mint_actor_certificate
+    object: actor:runner-1
   - user: user:egress
     relation: egress_gateway
     object: global:root
@@ -328,11 +331,13 @@ tests:
         assertions:
           can_resume: true
           can_mint_actor_jwt: true
+          can_mint_actor_certificate: true
       - user: user:scoped
         object: actor:runner-2
         assertions:
           can_resume: false
           can_mint_actor_jwt: false
+          can_mint_actor_certificate: false
       - user: user:bob
         object: actor:runner-1
         assertions:
@@ -344,8 +349,13 @@ tests:
           can_get: true
           can_get_egress_policy: true
           can_mint_actor_jwt: true
-          can_mint_actor_certificate: true
+          can_mint_actor_certificate: false
           can_resume: false
+      - user: user:egress
+        object: actor:runner-2
+        assertions:
+          can_mint_actor_jwt: true
+          can_mint_actor_certificate: false
       - user: user:router
         object: actor:runner-1
         assertions:

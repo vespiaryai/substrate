@@ -134,8 +134,7 @@ func both(aChecks []check, aErrs field.ErrorList, bChecks []check, bErrs field.E
 
 // rpcRule is the permission rule for one RPC.
 type rpcRule struct {
-	extract checkExtractor
-	// authorizedInHandler names the resource check performed by this RPC's handler.
+	extract             checkExtractor
 	authorizedInHandler string
 	// alwaysEnforce marks RPCs that are checked even when enforcement is
 	// disabled. AccessPolicy RPCs set it so that nobody can grant themselves
@@ -231,7 +230,6 @@ var defaultRPCPermissions = map[string]rpcRule{
 		return onActor(RelationCanDelete, r.GetActor(), field.NewPath("actor"))
 	})),
 
-	// Actor lifecycle.
 	ateapipb.Control_PauseActor_FullMethodName: rule(checksOf(func(r *ateapipb.PauseActorRequest) ([]check, field.ErrorList) {
 		return onActor(RelationCanSuspend, r.GetActor(), field.NewPath("actor"))
 	})),
@@ -245,7 +243,6 @@ var defaultRPCPermissions = map[string]rpcRule{
 		return onActor(RelationCanRevert, r.GetActor(), field.NewPath("actor"))
 	})),
 
-	// Egress policies and Actor credentials.
 	ateapipb.Control_GetActorEgressPolicy_FullMethodName: rule(checksOf(func(r *ateapipb.GetActorEgressPolicyRequest) ([]check, field.ErrorList) {
 		return onActor(RelationCanGetEgressPolicy, r.GetActor(), field.NewPath("actor"))
 	})),
@@ -265,7 +262,6 @@ var defaultRPCPermissions = map[string]rpcRule{
 		return onActor(RelationCanMintActorCertificate, r.GetActor(), field.NewPath("actor"))
 	})),
 
-	// Workers.
 	ateapipb.Control_CreateWorker_FullMethodName: rule(checksOf(func(*ateapipb.CreateWorkerRequest) ([]check, field.ErrorList) {
 		return onGlobal(RelationCanCreateWorker)
 	})),
@@ -288,7 +284,6 @@ var defaultRPCPermissions = map[string]rpcRule{
 		return onWorker(RelationCanListActorAssignments, r.GetWorker().GetName(), field.NewPath("worker", "name"))
 	})),
 
-	// Tags. A source Actor is separately authorized because tags retain its snapshot.
 	ateapipb.Control_CreateTag_FullMethodName: rule(checksOf(func(r *ateapipb.CreateTagRequest) ([]check, field.ErrorList) {
 		tag := r.GetTag()
 		spaceChecks, spaceErrs := onAtespace(RelationCanCreateTag, tag.GetMetadata().GetAtespace(), field.NewPath("tag", "metadata", "atespace"))

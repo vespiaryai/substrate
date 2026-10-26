@@ -244,6 +244,26 @@ func TestMintAteomActorCertificate_Errors(t *testing.T) {
 			},
 			want: codes.Aborted,
 		},
+		{
+			name: "other node with wrong uid and invalid csr",
+			ctx:  ateletauthtest.ContextWith(ateletauthtest.CertOn(t, "node-2")),
+			req: &ateapipb.MintAteomActorCertificateRequest{
+				Actor:                     &ateapipb.ObjectRef{Atespace: "team-a", Name: "my-actor"},
+				ActorUid:                  "00000000-0000-0000-0000-000000000000",
+				CertificateSigningRequest: []byte("invalid CSR"),
+			},
+			want: codes.NotFound,
+		},
+		{
+			name: "other node with absent actor and invalid csr",
+			ctx:  ateletauthtest.ContextWith(ateletauthtest.CertOn(t, "node-2")),
+			req: &ateapipb.MintAteomActorCertificateRequest{
+				Actor:                     &ateapipb.ObjectRef{Atespace: "team-a", Name: "nonexistent"},
+				ActorUid:                  "00000000-0000-0000-0000-000000000000",
+				CertificateSigningRequest: []byte("invalid CSR"),
+			},
+			want: codes.NotFound,
+		},
 	}
 
 	for _, tc := range tests {
