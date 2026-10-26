@@ -62,6 +62,9 @@ func (e *Env) DeployAteSystem(ctx context.Context, opts DeployOptions) error {
 	if err := e.RequireCanonicalNamespace("deploy ate-system"); err != nil {
 		return err
 	}
+	if err := e.prepareK3sS3CA(); err != nil {
+		return err
+	}
 	// Fail fast on an unusable build version or credential provider selection
 	// before touching the cluster.
 	if _, _, err := e.SubstrateVersion(); err != nil {
@@ -84,6 +87,9 @@ func (e *Env) DeployAteSystem(ctx context.Context, opts DeployOptions) error {
 
 	// The namespace has to exist before RBAC or CRDs are applied.
 	if err := e.EnsureAteSystemNamespace(ctx); err != nil {
+		return err
+	}
+	if err := e.reconcileK3sS3CA(ctx, true); err != nil {
 		return err
 	}
 
@@ -288,11 +294,22 @@ func setPodcertWorkersPerSigner(objs []*unstructured.Unstructured, workers int) 
 // DeployAteAPIServer redeploys only ate-api-server.
 func (e *Env) DeployAteAPIServer(ctx context.Context) error {
 	log.Step("deploy_ate_apiserver")
+	if e.Cfg.K3s != nil {
+		if err := e.RequireCanonicalNamespace("deploy apiserver"); err != nil {
+			return err
+		}
+	}
+	if err := e.prepareK3sS3CA(); err != nil {
+		return err
+	}
 
 	if err := e.EnsureCRDs(ctx); err != nil {
 		return err
 	}
 	if err := e.EnsureAteSystemNamespace(ctx); err != nil {
+		return err
+	}
+	if err := e.reconcileK3sS3CA(ctx, false); err != nil {
 		return err
 	}
 	if err := e.EnsureAPIServerPrerequisites(ctx); err != nil {
@@ -345,11 +362,22 @@ func (e *Env) DeployAteController(ctx context.Context) error {
 // DeployAtelet redeploys only the atelet DaemonSet.
 func (e *Env) DeployAtelet(ctx context.Context) error {
 	log.Step("deploy_atelet")
+	if e.Cfg.K3s != nil {
+		if err := e.RequireCanonicalNamespace("deploy atelet"); err != nil {
+			return err
+		}
+	}
+	if err := e.prepareK3sS3CA(); err != nil {
+		return err
+	}
 
 	if err := e.EnsureCRDs(ctx); err != nil {
 		return err
 	}
 	if err := e.EnsureAteSystemNamespace(ctx); err != nil {
+		return err
+	}
+	if err := e.reconcileK3sS3CA(ctx, false); err != nil {
 		return err
 	}
 	if err := e.LabelNodesSubstrateVersion(ctx); err != nil {

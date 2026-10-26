@@ -81,6 +81,7 @@ type Env struct {
 	// work on a machine with no container registry credentials configured, and
 	// the build-from-source resolver fails at construction without them.
 	resolver imageResolver
+	s3CA     *s3CAPlan
 
 	// substrateVersion caches the derived build version and its object-name
 	// suffix; see SubstrateVersion.

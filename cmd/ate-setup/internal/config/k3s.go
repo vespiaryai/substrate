@@ -23,7 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
-type K3sProfile struct{ Node, NodeUID, SystemUID, KubeletRoot, S3Endpoint, S3Region, S3Secret, SnapshotController, SnapshotControllerUID string }
+type K3sProfile struct{ Node, NodeUID, SystemUID, KubeletRoot, S3Endpoint, S3Region, S3Secret, S3CAFile, SnapshotController, SnapshotControllerUID string }
 
 func (c *Config) ValidateK3s() error {
 	if c.K3s == nil {
@@ -48,6 +48,9 @@ func (c *Config) ValidateK3s() error {
 	}
 	if len(validation.IsDNS1123Subdomain(p.S3Secret)) != 0 {
 		return fmt.Errorf("invalid k3s S3 Secret name")
+	}
+	if p.S3CAFile != "" && (!filepath.IsAbs(p.S3CAFile) || filepath.Clean(p.S3CAFile) != p.S3CAFile) {
+		return fmt.Errorf("k3s S3 CA file must be a clean absolute path")
 	}
 	return nil
 }

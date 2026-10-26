@@ -265,6 +265,7 @@ func buildConfig(root string, env map[string]string, r *Resolved) (*Config, erro
 			S3Endpoint:            r.String("k3s.s3Endpoint"),
 			S3Region:              r.String("k3s.s3Region"),
 			S3Secret:              r.String("k3s.s3Secret"),
+			S3CAFile:              r.String("k3s.s3CAFile"),
 			SnapshotController:    r.String("k3s.snapshotController"),
 			SnapshotControllerUID: r.String("k3s.snapshotControllerUID"),
 		}
@@ -344,6 +345,9 @@ func namedExplicitly(r *Resolved, key string) bool {
 // validateResolved rejects invalid and conflicting settings, naming the channel
 // each value came from so the reader knows which one to edit.
 func validateResolved(cfg *Config, r *Resolved) error {
+	if ca, _ := r.Value("k3s.s3CAFile"); ca.Raw != "" && cfg.K3s == nil {
+		return &InvalidError{Value: ca, Want: "a k3s profile"}
+	}
 	// The repo/tag pairing is checked here rather than in images.Source.Validate
 	// because only here is the channel that supplied each half known. A tag on
 	// its own would otherwise be discarded in silence, leaving a build from

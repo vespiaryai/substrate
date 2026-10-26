@@ -14,7 +14,10 @@
 
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestK3sProfileRejectsUnsafeConfigurations(t *testing.T) {
 	valid := func() *Config {
@@ -36,6 +39,8 @@ func TestK3sProfileRejectsUnsafeConfigurations(t *testing.T) {
 		{"cloud project", func(c *Config) { c.ProjectID = "inherited" }},
 		{"plaintext snapshot service", func(c *Config) { c.K3s.S3Endpoint = "http://localhost:9000" }},
 		{"missing credential Secret", func(c *Config) { c.K3s.S3Secret = "" }},
+		{"relative CA file", func(c *Config) { c.K3s.S3CAFile = "relative.pem" }},
+		{"unclean CA file", func(c *Config) { c.K3s.S3CAFile = "/tmp/../ca.pem" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := valid()
@@ -63,6 +68,7 @@ func TestK3sSettingsBuildConfig(t *testing.T) {
 		"ATE_K3S_S3_ENDPOINT":             "https://snapshots.example.test",
 		"ATE_K3S_S3_REGION":               "local-region",
 		"ATE_K3S_S3_SECRET":               "snapshot-credentials",
+		"ATE_K3S_S3_CA_FILE":              "/public/ca.pem",
 		"ATE_K3S_SNAPSHOT_CONTROLLER":     "snapshot-system/snapshot-controller",
 		"ATE_K3S_SNAPSHOT_CONTROLLER_UID": "snapshot-controller-uid",
 	}
@@ -82,6 +88,7 @@ func TestK3sSettingsBuildConfig(t *testing.T) {
 		S3Endpoint:            "https://snapshots.example.test",
 		S3Region:              "local-region",
 		S3Secret:              "snapshot-credentials",
+		S3CAFile:              "/public/ca.pem",
 		SnapshotController:    "snapshot-system/snapshot-controller",
 		SnapshotControllerUID: "snapshot-controller-uid",
 	}
@@ -93,5 +100,42 @@ func TestK3sSettingsBuildConfig(t *testing.T) {
 	}
 	if cfg.Kind || cfg.ProjectID != "" || cfg.ClusterName != "" || cfg.ClusterLocation != "" || cfg.CloudSQL.Instance != "" {
 		t.Errorf("local profile contains Kind/GCP configuration: Kind=%v project=%q cluster=%q location=%q CloudSQL=%q", cfg.Kind, cfg.ProjectID, cfg.ClusterName, cfg.ClusterLocation, cfg.CloudSQL.Instance)
+	}
+}
+
+func TestK3sS3CAFileChannels(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		env   map[string]string
+		file  map[string]string
+		flags map[string]string
+		want  string
+	}{
+		{"unset", nil, nil, nil, ""},
+		{"environment", map[string]string{"ATE_K3S_S3_CA_FILE": "/env.pem"}, nil, nil, "/env.pem"},
+		{"file", map[string]string{"ATE_K3S_S3_CA_FILE": "/env.pem"}, map[string]string{"k3s.s3CAFile": "/file.pem"}, nil, "/file.pem"},
+		{"flag", map[string]string{"ATE_K3S_S3_CA_FILE": "/env.pem"}, map[string]string{"k3s.s3CAFile": "/file.pem"}, map[string]string{"k3s-s3-ca-file": "/flag.pem"}, "/flag.pem"},
+		{"empty file clears environment", map[string]string{"ATE_K3S_S3_CA_FILE": "/env.pem"}, map[string]string{"k3s.s3CAFile": ""}, nil, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, err := Resolve(flagsWith(t, tc.flags), ResolveOptions{Env: tc.env, File: fileWith(tc.file)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := r.String("k3s.s3CAFile"); got != tc.want {
+				t.Fatalf("CA file = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestK3sS3CAFileRequiresProfile(t *testing.T) {
+	r, err := Resolve(nil, ResolveOptions{Env: map[string]string{"ATE_K3S_S3_CA_FILE": "/public.pem"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = buildConfig(t.TempDir(), nil, r)
+	if err == nil || !strings.Contains(err.Error(), "ATE_K3S_S3_CA_FILE") {
+		t.Fatalf("non-k3s CA input error = %v", err)
 	}
 }
