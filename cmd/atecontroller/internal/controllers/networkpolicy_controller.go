@@ -18,9 +18,11 @@ import (
 	"context"
 	"fmt"
 
+	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	k8errors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
 	networkingv1ac "k8s.io/client-go/applyconfigurations/networking/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -103,7 +105,6 @@ func (r *NetworkPolicyReconciler) buildNetworkPolicyApplyConfig(wp *atev1alpha1.
 			WithController(true).
 			WithBlockOwnerDeletion(true))
 
-	// Ingress policy: only accept connections from the atenet-router, all ports.
 	np.
 		WithSpec(networkingv1ac.NetworkPolicySpec().
 			WithPodSelector(metav1ac.LabelSelector().
@@ -111,6 +112,14 @@ func (r *NetworkPolicyReconciler) buildNetworkPolicyApplyConfig(wp *atev1alpha1.
 			WithPolicyTypes(networkingv1.PolicyTypeIngress).
 			WithIngress(
 				networkingv1ac.NetworkPolicyIngressRule().
+					WithPorts(
+						networkingv1ac.NetworkPolicyPort().
+							WithProtocol(corev1.ProtocolTCP).
+							WithPort(intstr.FromInt32(workerHTTPSPort)),
+						networkingv1ac.NetworkPolicyPort().
+							WithProtocol(corev1.ProtocolTCP).
+							WithPort(intstr.FromInt32(workerConnectPort)),
+					).
 					WithFrom(
 						networkingv1ac.NetworkPolicyPeer().
 							WithNamespaceSelector(metav1ac.LabelSelector().

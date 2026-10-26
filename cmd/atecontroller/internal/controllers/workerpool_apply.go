@@ -27,6 +27,7 @@ import (
 	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
 
 	"github.com/agent-substrate/substrate/internal/ateom"
+	"github.com/agent-substrate/substrate/internal/atunnel"
 	"github.com/agent-substrate/substrate/internal/deviceplugin"
 	"github.com/agent-substrate/substrate/internal/installdefaults"
 	"github.com/agent-substrate/substrate/internal/nodepath"
@@ -89,6 +90,11 @@ type ateomOTelSettings struct {
 const workerPoolLabel = "ate.dev/worker-pool"
 
 const (
+	workerHTTPSPort   int32 = 443
+	workerConnectPort int32 = atunnel.DefaultConnectPort
+)
+
+const (
 	atunnelIdentityVolume       = "atunnel-identity"
 	atunnelIdentityMountPath    = "/run/podidentity.podcert.ate.dev"
 	atunnelEgressTrustVolume    = "atunnel-egress-trust"
@@ -115,8 +121,8 @@ func buildDeploymentApplyConfig(wp *atev1alpha1.WorkerPool, otel ateomOTelSettin
 
 	args := []string{
 		"--pod-uid=$(POD_UID)",
-		"--atunnel-listen-address=:443",
-		"--atunnel-connect-listen-address=:8443",
+		fmt.Sprintf("--atunnel-listen-address=:%d", workerHTTPSPort),
+		fmt.Sprintf("--atunnel-connect-listen-address=:%d", workerConnectPort),
 		"--atunnel-credential-bundle=" + atunnelIdentityMountPath + "/credential-bundle.pem",
 		"--atunnel-trust-bundle=" + atunnelIdentityMountPath + "/trust-bundle.pem",
 		// The peers atunnel authenticates live in substrate's namespace, not
@@ -155,11 +161,11 @@ func buildDeploymentApplyConfig(wp *atev1alpha1.WorkerPool, otel ateomOTelSettin
 		WithArgs(args...).
 		WithPorts(corev1ac.ContainerPort().
 			WithName("https").
-			WithContainerPort(443).
+			WithContainerPort(workerHTTPSPort).
 			WithProtocol(corev1.ProtocolTCP),
 			corev1ac.ContainerPort().
 				WithName("connect").
-				WithContainerPort(8443).
+				WithContainerPort(workerConnectPort).
 				WithProtocol(corev1.ProtocolTCP),
 			corev1ac.ContainerPort().
 				WithName("readyz").
