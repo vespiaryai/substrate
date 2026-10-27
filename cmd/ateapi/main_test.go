@@ -31,7 +31,108 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/agent-substrate/substrate/cmd/ateapi/internal/authz"
+	"github.com/agent-substrate/substrate/internal/installdefaults"
+	"github.com/spf13/pflag"
 )
+
+func TestResolveSystemPrincipalsFromStartupConfiguration(t *testing.T) {
+	tests := []struct {
+		name      string
+		namespace string
+		accounts  systemServiceAccounts
+		want      authz.SystemPrincipals
+	}{
+		{
+			name: "installed defaults",
+			accounts: systemServiceAccounts{
+				controller: *controllerServiceAccount,
+				router:     *routerServiceAccount,
+				atelet:     *ateletServiceAccount,
+				egress:     *egressServiceAccount,
+				apiSidecar: *apiSidecarServiceAccount,
+			},
+			want: authz.SystemPrincipals{
+				ControllerSPIFFEID:    "spiffe://cluster.local/ns/ate-system/sa/ate-controller",
+				IngressRouterSPIFFEID: "spiffe://cluster.local/ns/ate-system/sa/atenet-router",
+				AteletSPIFFEID:        "spiffe://cluster.local/ns/ate-system/sa/atelet",
+			},
+		},
+		{
+			name:      "selected namespace and service accounts",
+			namespace: "team-a",
+			accounts: systemServiceAccounts{
+				controller: "team-controller",
+				router:     "team-router",
+				atelet:     "team-atelet",
+				egress:     "team-egress",
+				apiSidecar: "team-sidecar",
+			},
+			want: authz.SystemPrincipals{
+				ControllerSPIFFEID:       "spiffe://cluster.local/ns/team-a/sa/team-controller",
+				IngressRouterSPIFFEID:    "spiffe://cluster.local/ns/team-a/sa/team-router",
+				AteletSPIFFEID:           "spiffe://cluster.local/ns/team-a/sa/team-atelet",
+				EgressGatewaySPIFFEID:    "spiffe://cluster.local/ns/team-a/sa/team-egress",
+				APIServerSidecarSPIFFEID: "spiffe://cluster.local/ns/team-a/sa/team-sidecar",
+			},
+		},
+		{
+			name:     "absent optional components",
+			accounts: systemServiceAccounts{atelet: "atelet"},
+			want:     authz.SystemPrincipals{AteletSPIFFEID: "spiffe://cluster.local/ns/ate-system/sa/atelet"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(installdefaults.PodNamespaceEnv, tt.namespace)
+			got, err := resolveSystemPrincipals(installdefaults.NamespaceFromPodEnv(), tt.accounts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Errorf("resolveSystemPrincipals() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+	if _, err := resolveSystemPrincipals("ate-system", systemServiceAccounts{}); err == nil || !strings.Contains(err.Error(), "--atelet-service-account") {
+		t.Fatalf("empty atelet ServiceAccount error = %v", err)
+	}
+	if _, err := resolveSystemPrincipals("ate-system", systemServiceAccounts{controller: "other/../ate-controller", atelet: "atelet"}); err == nil || !strings.Contains(err.Error(), "--controller-service-account") {
+		t.Fatalf("invalid controller ServiceAccount error = %v", err)
+	}
+	if _, err := resolveSystemPrincipals("other/team", systemServiceAccounts{atelet: "atelet"}); err == nil || !strings.Contains(err.Error(), "pod namespace") {
+		t.Fatalf("invalid pod namespace error = %v", err)
+	}
+}
+
+func TestAuthzStartupOwnerGuardAndFlagPrecedence(t *testing.T) {
+	if err := validateAuthzStartup(true, nil); err == nil {
+		t.Fatal("enforcement without an owner was accepted")
+	}
+	if err := validateAuthzStartup(true, []string{"system:serviceaccount:ate-system:ate-client"}); err != nil {
+		t.Fatalf("enforcement with an owner was rejected: %v", err)
+	}
+	if err := validateAuthzStartup(false, nil); err != nil {
+		t.Fatalf("flag-off startup was rejected: %v", err)
+	}
+	oldValue := *experimentalEnableAuthz
+	flag := pflag.Lookup("experimental-enable-authz")
+	oldChanged := flag.Changed
+	t.Cleanup(func() {
+		*experimentalEnableAuthz = oldValue
+		flag.Changed = oldChanged
+	})
+	*experimentalEnableAuthz = false
+	flag.Changed = true
+	t.Setenv("ATE_API_EXPERIMENTAL_ENABLE_AUTHZ", "true")
+	if err := loadFlagsFromEnv(); err != nil {
+		t.Fatal(err)
+	}
+	if *experimentalEnableAuthz {
+		t.Fatal("environment overrode the explicit false flag")
+	}
+}
 
 func TestConnectStoreRequiresPostgresReadWriteConnectionString(t *testing.T) {
 	oldDSN := *postgresReadWriteConnectionString

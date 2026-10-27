@@ -47,6 +47,13 @@ func TestParseSystemPrincipals(t *testing.T) {
 	if _, err := parseSystemPrincipals(SystemPrincipals{EgressGatewaySPIFFEID: "not-a-spiffe-id"}); err == nil {
 		t.Error("invalid SPIFFE ID accepted")
 	}
+	onlyAtelet, err := parseSystemPrincipals(SystemPrincipals{AteletSPIFFEID: ids.AteletSPIFFEID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff := cmp.Diff(map[string][]string{formatUser(ids.AteletSPIFFEID): {RoleAtelet}}, onlyAtelet); diff != "" {
+		t.Errorf("absent component received a role (-want +got):\n%s", diff)
+	}
 }
 
 func TestFormatMember(t *testing.T) {

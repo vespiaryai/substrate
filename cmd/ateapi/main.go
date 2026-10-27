@@ -58,6 +58,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -90,10 +91,14 @@ var (
 	actorJWTIssuer              = pflag.String("actor-jwt-issuer", "", "Issuer URL placed in the iss claim of actor JWTs. Relying parties fetch <issuer>/.well-known/openid-configuration to verify them. Must be https with no query or fragment. Empty means https://"+installdefaults.IDPServiceName+".<pod namespace>.svc.")
 	defaultEgressGatewayAddress = pflag.String("default-egress-gateway-address", "", "Default address (host:port) of the egress PEP that each actor's atunnel dials. Sent on every atelet Run and Restore, so it takes effect at the actor's next activation. Empty leaves actors with no TCP egress.")
 
-	actorIDCAPoolFile      = pflag.String("actor-id-ca-pool", "", "The file that contains the CA pool for signing actor JWTs")
-	podIdentityCACerts     = pflag.String("pod-identity-ca-certs", "", "The file that contains the pod-identity CA bundle, used both for verifying client certificates presented to the gRPC server and for verifying atelet serving certificates when dialing atelet. If empty, client-cert verification is disabled and atelet dials will fail.")
-	ateletClientCredBundle = pflag.String("atelet-client-cred-bundle", "", "Credential bundle presented as the client certificate when dialing atelet.")
-	ateletServiceAccount   = pflag.String("atelet-service-account", installdefaults.AteletServiceAccount, "ServiceAccount atelet runs as. It is the service-account segment of the SPIFFE ID expected on atelet's certificate, so it has to match what the deployment actually creates; a deployment that prefixes resource names needs it set.")
+	actorIDCAPoolFile        = pflag.String("actor-id-ca-pool", "", "The file that contains the CA pool for signing actor JWTs")
+	podIdentityCACerts       = pflag.String("pod-identity-ca-certs", "", "The file that contains the pod-identity CA bundle, used both for verifying client certificates presented to the gRPC server and for verifying atelet serving certificates when dialing atelet. If empty, client-cert verification is disabled and atelet dials will fail.")
+	ateletClientCredBundle   = pflag.String("atelet-client-cred-bundle", "", "Credential bundle presented as the client certificate when dialing atelet.")
+	ateletServiceAccount     = pflag.String("atelet-service-account", installdefaults.AteletServiceAccount, "ServiceAccount atelet runs as. It is the service-account segment of the SPIFFE ID expected on atelet's certificate, so it has to match what the deployment actually creates; a deployment that prefixes resource names needs it set.")
+	controllerServiceAccount = pflag.String("controller-service-account", "ate-controller", "ServiceAccount used by the controller when calling the API. Empty disables its system role.")
+	routerServiceAccount     = pflag.String("router-service-account", installdefaults.RouterServiceAccount, "ServiceAccount used by the ingress router when calling the API. Empty disables its system role.")
+	egressServiceAccount     = pflag.String("egress-service-account", "", "ServiceAccount used by a deployed egress gateway when calling the API. Empty disables its system role.")
+	apiSidecarServiceAccount = pflag.String("api-sidecar-service-account", "", "ServiceAccount used by a separate API sidecar caller. Empty disables its system role.")
 
 	drainDelay   = pflag.Duration("drain-delay", 13*time.Second, "How long to keep accepting new work after SIGTERM, before starting the gRPC drain.")
 	drainTimeout = pflag.Duration("drain-timeout", 15*time.Second, "Deadline for the graceful gRPC drain on shutdown. In-flight RPCs still running past it are forcefully cancelled.")
@@ -184,17 +189,30 @@ func main() {
 	// The authz stack is always wired so policy tuples stay in sync with the
 	// store; --experimental-enable-authz only controls enforcement in the
 	// interceptor.
-	if *experimentalEnableAuthz && len(*authzBootstrapOwners) == 0 {
+	if err := validateAuthzStartup(*experimentalEnableAuthz, *authzBootstrapOwners); err != nil {
 		// Without a bootstrap owner, nobody could create the global
 		// AccessPolicy, so the enforced API would be unusable.
-		serverboot.Fatal(ctx, "Invalid flags", fmt.Errorf("--authz-bootstrap-owners must list at least one principal when --experimental-enable-authz is set"))
+		serverboot.Fatal(ctx, "Invalid flags", err)
 	}
+	ateletNamespace := installdefaults.NamespaceFromPodEnv()
+	systemPrincipals, err := resolveSystemPrincipals(ateletNamespace, systemServiceAccounts{
+		controller: *controllerServiceAccount,
+		router:     *routerServiceAccount,
+		atelet:     *ateletServiceAccount,
+		egress:     *egressServiceAccount,
+		apiSidecar: *apiSidecarServiceAccount,
+	})
+	if err != nil {
+		serverboot.Fatal(ctx, "Invalid flags", err)
+	}
+	ateletSPIFFEID := systemPrincipals.AteletSPIFFEID
+	slog.InfoContext(ctx, "Resolved atelet namespace", slog.String("atelet-namespace", ateletNamespace), slog.String("atelet-spiffe-id", ateletSPIFFEID))
 	fgaServer, err := authz.NewOpenFGAServer(pool)
 	if err != nil {
 		serverboot.Fatal(ctx, "Failed to create OpenFGA server", err)
 	}
 	defer fgaServer.Close()
-	authorizer, policyManager, err := authz.New(shutdownCtx, pool, fgaServer, *authzBootstrapOwners)
+	authorizer, policyManager, err := authz.New(shutdownCtx, pool, fgaServer, *authzBootstrapOwners, systemPrincipals)
 	if err != nil {
 		serverboot.Fatal(ctx, "Failed to initialize OpenFGA authz", err)
 	}
@@ -219,18 +237,6 @@ func main() {
 	workerPoolLister := ateFactory.Api().V1alpha1().WorkerPools().Lister()
 	sandboxConfigLister := ateFactory.Api().V1alpha1().SandboxConfigs().Lister()
 	csiDriverConfigLister := ateFactory.Api().V1alpha1().CSIDriverConfigs().Lister()
-
-	// atelet shares ateapi's namespace in every supported deployment topology,
-	// so we read it from Kubernetes' downward API rather than expose a flag.
-	ateletNamespace := installdefaults.NamespaceFromPodEnv()
-	// An empty ServiceAccount would not fail here: path.Join drops the empty
-	// segment, yielding an identity that parses but matches nothing, so every
-	// atelet dial would be rejected with no hint at the cause.
-	if *ateletServiceAccount == "" {
-		serverboot.Fatal(ctx, "Invalid flags", fmt.Errorf("--atelet-service-account must not be empty"))
-	}
-	ateletSPIFFEID := installdefaults.SPIFFEID(ateletNamespace, *ateletServiceAccount)
-	slog.InfoContext(ctx, "Resolved atelet namespace", slog.String("atelet-namespace", ateletNamespace), slog.String("atelet-spiffe-id", ateletSPIFFEID))
 
 	ateletPodInformerFactory, ateletPodInformer := controlapi.AteletInformer(clientset, ateletNamespace)
 	scInformerFactory := informers.NewSharedInformerFactory(clientset, 0)
@@ -353,6 +359,54 @@ func main() {
 	slog.InfoContext(ctx, "Shutdown complete")
 }
 
+type systemServiceAccounts struct {
+	controller string
+	router     string
+	atelet     string
+	egress     string
+	apiSidecar string
+}
+
+func resolveSystemPrincipals(namespace string, accounts systemServiceAccounts) (authz.SystemPrincipals, error) {
+	if accounts.atelet == "" {
+		return authz.SystemPrincipals{}, fmt.Errorf("--atelet-service-account must not be empty")
+	}
+	if len(validation.IsDNS1123Label(namespace)) > 0 {
+		return authz.SystemPrincipals{}, fmt.Errorf("pod namespace %q is invalid", namespace)
+	}
+	for _, entry := range []struct{ name, serviceAccount string }{
+		{"controller", accounts.controller},
+		{"router", accounts.router},
+		{"atelet", accounts.atelet},
+		{"egress", accounts.egress},
+		{"api-sidecar", accounts.apiSidecar},
+	} {
+		if entry.serviceAccount != "" && len(validation.IsDNS1123Subdomain(entry.serviceAccount)) > 0 {
+			return authz.SystemPrincipals{}, fmt.Errorf("--%s-service-account %q is invalid", entry.name, entry.serviceAccount)
+		}
+	}
+	spiffeID := func(serviceAccount string) string {
+		if serviceAccount == "" {
+			return ""
+		}
+		return installdefaults.SPIFFEID(namespace, serviceAccount)
+	}
+	return authz.SystemPrincipals{
+		ControllerSPIFFEID:       spiffeID(accounts.controller),
+		IngressRouterSPIFFEID:    spiffeID(accounts.router),
+		AteletSPIFFEID:           spiffeID(accounts.atelet),
+		EgressGatewaySPIFFEID:    spiffeID(accounts.egress),
+		APIServerSidecarSPIFFEID: spiffeID(accounts.apiSidecar),
+	}, nil
+}
+
+func validateAuthzStartup(enforce bool, bootstrapOwners []string) error {
+	if enforce && len(bootstrapOwners) == 0 {
+		return fmt.Errorf("--authz-bootstrap-owners must list at least one principal when --experimental-enable-authz is set")
+	}
+	return nil
+}
+
 func drainOnShutdown(ctx context.Context, srv *grpc.Server, readiness *serverboot.Readiness) <-chan struct{} {
 	done := make(chan struct{})
 	go func() {
@@ -431,6 +485,11 @@ func logFlagValues(ctx context.Context) {
 		slog.String("actor-id-ca-pool", *actorIDCAPoolFile),
 		slog.String("pod-identity-ca-certs", *podIdentityCACerts),
 		slog.String("atelet-client-cred-bundle", *ateletClientCredBundle),
+		slog.String("atelet-service-account", *ateletServiceAccount),
+		slog.String("controller-service-account", *controllerServiceAccount),
+		slog.String("router-service-account", *routerServiceAccount),
+		slog.String("egress-service-account", *egressServiceAccount),
+		slog.String("api-sidecar-service-account", *apiSidecarServiceAccount),
 		slog.Duration("drain-delay", *drainDelay),
 		slog.Duration("drain-timeout", *drainTimeout),
 	)

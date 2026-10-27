@@ -30,6 +30,9 @@ func TestComponentGrantsRequireMTLS(t *testing.T) {
 	if got := a.componentGrants(principal.PrincipalInfo{ID: id, Kind: principal.KindJWT}); got != nil {
 		t.Errorf("JWT with matching subject received component grant: %v", got)
 	}
+	if got := a.componentGrants(principal.PrincipalInfo{ID: id + "-other", Kind: principal.KindMTLS}); got != nil {
+		t.Errorf("mTLS identity with a near-match SPIFFE ID received component grant: %v", got)
+	}
 	want := []*openfgav1.TupleKey{{User: user, Relation: RoleEgressGateway, Object: GlobalRootObject}}
 	if diff := cmp.Diff(want, a.componentGrants(principal.PrincipalInfo{ID: id, Kind: principal.KindMTLS}), protocmp.Transform()); diff != "" {
 		t.Errorf("mTLS grant mismatch (-want +got):\n%s", diff)
