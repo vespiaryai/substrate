@@ -23,6 +23,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,9 +55,9 @@ def render(native_image, envoy_image):
     return raw.replace(NATIVE, native_image).replace(ENVOY, envoy_image).replace(MARKER, "").encode()
 
 
-def metadata(namespace, resource):
+def metadata(namespace, resource, context):
     result = subprocess.run(
-        ["kubectl", "-n", namespace, "get", resource, "-o", "json"],
+        ["kubectl", "--context=" + context, "-n", namespace, "get", resource, "-o", "json"],
         capture_output=True, text=True, check=False,
     )
     if result.returncode:
@@ -67,17 +68,20 @@ def metadata(namespace, resource):
     return {key: obj["metadata"][key] for key in ("uid", "resourceVersion")}
 
 
-def snapshot(namespace):
-    return {resource: metadata(namespace, resource) for resource in OBJECTS}
+def snapshot(namespace, context):
+    return {resource: metadata(namespace, resource, context) for resource in OBJECTS}
 
 
 def binding():
+    context = subprocess.check_output(["kubectl", "config", "current-context"], text=True).strip()
+    if not context:
+        raise RuntimeError("required cluster context is absent")
     result = {
-        "context": subprocess.check_output(["kubectl", "config", "current-context"], text=True).strip(),
-        "kube_system": metadata("kube-system", "namespace/kube-system"),
-        "ate_system": metadata("ate-system", "namespace/ate-system"),
-        "worker_namespace": metadata("ate-demo-sandbox", "namespace/ate-demo-sandbox"),
-        "api_deployment": metadata("ate-system", "deployment/ate-api-server"),
+        "context": context,
+        "kube_system": metadata("kube-system", "namespace/kube-system", context),
+        "ate_system": metadata("ate-system", "namespace/ate-system", context),
+        "worker_namespace": metadata("ate-demo-sandbox", "namespace/ate-demo-sandbox", context),
+        "api_deployment": metadata("ate-system", "deployment/ate-api-server", context),
     }
     if not result["context"] or any(result[name] is None for name in ("kube_system", "ate_system", "worker_namespace", "api_deployment")):
         raise RuntimeError("required cluster binding is absent")
@@ -85,21 +89,33 @@ def binding():
 
 
 def save(path, value):
-    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
-    path.chmod(0o600)
+    fd, name = tempfile.mkstemp(dir=path.parent, prefix=".operation-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as stream:
+            os.fchmod(stream.fileno(), 0o600)
+            stream.write(json.dumps(value, indent=2, sort_keys=True) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(name, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
 
 
 def invoke(argv, record):
     record["next_command"] = argv
+    record["state"] = "attempted_write"
+    record.setdefault("attempts", []).append(argv)
     save(record["receipt"], {k: v for k, v in record.items() if k != "receipt"})
     result = subprocess.run(argv, cwd=ROOT, check=False)
     if result.returncode:
-        record["state"] = "uncertain_write"
         record["exit_code"] = result.returncode
-        save(record["receipt"], {k: v for k, v in record.items() if k != "receipt"})
         raise RuntimeError(f"command failed or write outcome uncertain: {argv[0]}")
-    record["state"] = "completed_command"
-    save(record["receipt"], {k: v for k, v in record.items() if k != "receipt"})
 
 
 def main():
@@ -128,6 +144,10 @@ def main():
     if args.phase == "prepare":
         candidate.write_bytes(rendered)
         candidate.chmod(0o600)
+        cluster = binding()
+        before = snapshot(args.namespace, cluster["context"])
+        if any(before[name] is not None for name in OBJECTS if name != "secret/egress-mitm-ca-pool"):
+            raise RuntimeError("a create-only target already exists")
         record = {
             "state": "prepared_no_write",
             "namespace": args.namespace,
@@ -137,8 +157,8 @@ def main():
             "source_sha256": digest(SOURCE.read_bytes()),
             "manifest_sha256": digest(rendered),
             "policy_sha256": digest(policy),
-            "binding": binding(),
-            "before": snapshot(args.namespace),
+            "binding": cluster,
+            "before": before,
         }
         save(receipt, record)
         print(json.dumps({"manifest": str(candidate), "receipt": str(receipt), "manifest_sha256": record["manifest_sha256"]}))
@@ -152,27 +172,35 @@ def main():
         record["source_sha256"], record["manifest_sha256"], record["policy_sha256"]
     ) or candidate.read_bytes() != rendered:
         raise RuntimeError("reviewed source, manifest, or policy changed")
-    if snapshot(args.namespace) != record["before"]:
+    context = record["binding"]["context"]
+    if any(record["before"][name] is not None for name in OBJECTS if name != "secret/egress-mitm-ca-pool"):
+        raise RuntimeError("a create-only target existed at preparation")
+    if snapshot(args.namespace, context) != record["before"]:
         raise RuntimeError("resource UID or version changed after preparation")
     if binding() != record["binding"]:
         raise RuntimeError("cluster, namespace, or API binding changed after preparation")
     record["receipt"] = receipt
-    invoke(["mise", "exec", "--", "go", "run", "./cmd/ate-setup", "--no-dev-env", "create", "egress-mitm-ca-pool"], record)
-    after_ca = snapshot(args.namespace)
-    if any(after_ca[name] != record["before"][name] for name in OBJECTS if name != "secret/egress-mitm-ca-pool"):
-        record["state"] = "concurrent_change_after_ca"
+    try:
+        invoke(["mise", "exec", "--", "go", "run", "./cmd/ate-setup", "--no-dev-env", "--namespace=" + args.namespace, "--context=" + context, "create", "egress-mitm-ca-pool"], record)
+        after_ca = snapshot(args.namespace, context)
+        if any(after_ca[name] is not None for name in OBJECTS if name != "secret/egress-mitm-ca-pool"):
+            raise RuntimeError("a create-only target appeared after CA creation; reconcile before apply")
+        if after_ca["secret/egress-mitm-ca-pool"] is None:
+            raise RuntimeError("CA helper returned without a Secret; reconcile before apply")
+        invoke(["kubectl", "--context=" + context, "-n", args.namespace, "create", "-f", str(candidate)], record)
+        invoke(["kubectl", "--context=" + context, "-n", args.namespace, "create", "-f", str(POLICY)], record)
+        after = snapshot(args.namespace, context)
+        if any(after[name] is None for name in OBJECTS):
+            raise RuntimeError("created resources are absent at readback; reconcile before retry")
+        record["after"] = after
+        record["state"] = "applied_readback"
+        record.pop("next_command", None)
         save(receipt, {k: v for k, v in record.items() if k != "receipt"})
-        raise RuntimeError("another resource changed after CA creation; reconcile before apply")
-    if after_ca["secret/egress-mitm-ca-pool"] is None:
-        record["state"] = "ca_write_unverified"
-        save(receipt, {k: v for k, v in record.items() if k != "receipt"})
-        raise RuntimeError("CA helper returned without a Secret; reconcile before apply")
-    invoke(["kubectl", "-n", args.namespace, "apply", "-f", str(candidate)], record)
-    invoke(["kubectl", "-n", args.namespace, "apply", "-f", str(POLICY)], record)
-    record["after"] = snapshot(args.namespace)
-    record["state"] = "applied_readback"
-    record.pop("next_command", None)
-    save(receipt, {k: v for k, v in record.items() if k != "receipt"})
+    except BaseException:
+        if record["state"] != "applied_readback":
+            record["state"] = "uncertain_write"
+            save(receipt, {k: v for k, v in record.items() if k != "receipt"})
+        raise
 
 
 if __name__ == "__main__":
