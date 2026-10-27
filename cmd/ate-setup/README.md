@@ -35,3 +35,34 @@ has to be readable from here as well as from the cluster.
   exactly.
 - [`cli-diff.md`](cli-diff.md) — what a `hack/install-ate.sh` user can observe
   after the switch.
+
+## Staging k3s S3 trust
+
+Use `rotate s3 inspect` to capture the current ConfigMap UID, CA hash, resource
+version, client template hashes, and Pod UIDs. Save its JSON output before
+changing the cluster. The configuration must still name the installed old S3
+endpoint.
+
+```
+ate-setup --config /absolute/install.yaml rotate s3 inspect > /absolute/expected.json
+ate-setup --config /absolute/install.yaml rotate s3 trust \
+  --expected /absolute/expected.json \
+  --ca-file /absolute/old-and-new-public-roots.pem \
+  --rotation-receipt /absolute/new-rotation-receipt.json
+```
+
+The trust command accepts only a bundle of current public certificates that
+contains the installed old root and at least one additional root. It checks the
+installer owner, exact old CA hash and UID, ConfigMap resource version, and
+every API server and atelet workload UID, resource version, and Pod template.
+It updates the CA ConfigMap and the client Pod templates with Kubernetes
+resource-version checks, then waits for ready replacement Pods with new UIDs.
+It writes a separate receipt without replacing the historical install record.
+
+An update error stops the command after a fresh read of the CA and client
+templates. The error names the observed old, target, or partial state. Inspect
+those live resources before retrying with the original expected JSON and an
+unused receipt path.
+After success, prove a signed S3 read through both real clients against the old
+endpoint before switching endpoints. This command does not copy S3 data or
+change the endpoint.
