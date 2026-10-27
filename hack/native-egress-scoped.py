@@ -71,6 +71,19 @@ def snapshot(namespace):
     return {resource: metadata(namespace, resource) for resource in OBJECTS}
 
 
+def binding():
+    result = {
+        "context": subprocess.check_output(["kubectl", "config", "current-context"], text=True).strip(),
+        "kube_system": metadata("kube-system", "namespace/kube-system"),
+        "ate_system": metadata("ate-system", "namespace/ate-system"),
+        "worker_namespace": metadata("ate-demo-sandbox", "namespace/ate-demo-sandbox"),
+        "api_deployment": metadata("ate-system", "deployment/ate-api-server"),
+    }
+    if not result["context"] or any(result[name] is None for name in ("kube_system", "ate_system", "worker_namespace", "api_deployment")):
+        raise RuntimeError("required cluster binding is absent")
+    return result
+
+
 def save(path, value):
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
     path.chmod(0o600)
@@ -124,6 +137,7 @@ def main():
             "source_sha256": digest(SOURCE.read_bytes()),
             "manifest_sha256": digest(rendered),
             "policy_sha256": digest(policy),
+            "binding": binding(),
             "before": snapshot(args.namespace),
         }
         save(receipt, record)
@@ -140,6 +154,8 @@ def main():
         raise RuntimeError("reviewed source, manifest, or policy changed")
     if snapshot(args.namespace) != record["before"]:
         raise RuntimeError("resource UID or version changed after preparation")
+    if binding() != record["binding"]:
+        raise RuntimeError("cluster, namespace, or API binding changed after preparation")
     record["receipt"] = receipt
     invoke(["mise", "exec", "--", "go", "run", "./cmd/ate-setup", "--no-dev-env", "create", "egress-mitm-ca-pool"], record)
     after_ca = snapshot(args.namespace)
