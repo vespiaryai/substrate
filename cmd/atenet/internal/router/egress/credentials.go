@@ -45,7 +45,8 @@ func mapCredentialProviderError(err error) error {
 	}
 }
 
-func (h *Handler) applyEffects(ctx context.Context, ref resources.ActorRef, dest egresspolicy.Destination, headers map[string]string, effects *ateapipb.HttpRuleEffects) ([]*corev3.HeaderValueOption, error) {
+func (h *Handler) applyEffects(ctx context.Context, identity actorIncarnation, dest egresspolicy.Destination, headers map[string]string, effects *ateapipb.HttpRuleEffects) ([]*corev3.HeaderValueOption, error) {
+	ref := identity.Ref
 	var injections []*ateapipb.CredentialHeader
 	for _, inj := range effects.GetReplaceHeaders() {
 		if _, ok := headers[strings.ToLower(inj.GetHeader())]; ok {
@@ -71,7 +72,7 @@ func (h *Handler) applyEffects(ctx context.Context, ref resources.ActorRef, dest
 			return nil, extproc.WrapReqError(envoy_type.StatusCode_InternalServerError, err, deniedBody)
 		}
 		if src := inj.GetActorJwt(); src != nil {
-			token, err := h.actorJWT(ctx, ref, src)
+			token, err := h.actorJWT(ctx, identity, src)
 			if ctx.Err() != nil {
 				err = ctx.Err()
 			}
@@ -80,7 +81,7 @@ func (h *Handler) applyEffects(ctx context.Context, ref resources.ActorRef, dest
 				switch {
 				case ctx.Err() != nil:
 					code = envoy_type.StatusCode_RequestTimeout
-				case status.Code(err) == codes.NotFound, status.Code(err) == codes.PermissionDenied:
+				case status.Code(err) == codes.NotFound, status.Code(err) == codes.PermissionDenied, status.Code(err) == codes.Aborted:
 					code = envoy_type.StatusCode_Forbidden
 				case status.Code(err) == codes.Unavailable, status.Code(err) == codes.DeadlineExceeded, errors.Is(err, context.DeadlineExceeded):
 					code = envoy_type.StatusCode_ServiceUnavailable
@@ -140,7 +141,7 @@ func (h *Handler) applyEffects(ctx context.Context, ref resources.ActorRef, dest
 	return setHeaders, nil
 }
 
-func (h *Handler) actorJWT(ctx context.Context, ref resources.ActorRef, src *ateapipb.ActorJWTSource) (string, error) {
+func (h *Handler) actorJWT(ctx context.Context, identity actorIncarnation, src *ateapipb.ActorJWTSource) (string, error) {
 	audiences := src.GetAudiences()
 	if len(audiences) == 0 || len(audiences) > 16 || src.GetExpirationSeconds() < 300 || src.GetExpirationSeconds() > 3600 {
 		return "", fmt.Errorf("invalid actor JWT policy")
@@ -155,7 +156,8 @@ func (h *Handler) actorJWT(ctx context.Context, ref resources.ActorRef, src *ate
 	mintCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
 	resp, err := h.apiClient.MintActorJWT(mintCtx, &ateapipb.MintActorJWTRequest{
-		Actor:             ref.ToObjectRef(),
+		Actor:             identity.Ref.ToObjectRef(),
+		ExpectedActorUid:  identity.UID,
 		Audience:          audiences,
 		ExpirationSeconds: src.GetExpirationSeconds(),
 	})

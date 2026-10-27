@@ -555,6 +555,9 @@ func (s *RPCService) MintActorJWT(ctx context.Context, req *ateapipb.MintActorJW
 	} else if err != nil {
 		return nil, fmt.Errorf("while retrieving actor: %w", err)
 	}
+	if dbActor.GetMetadata().GetUid() != req.GetExpectedActorUid() {
+		return nil, apierror.Aborted("conflict; actor has been deleted and recreated")
+	}
 
 	// We only issue tokens with audience bindings.
 	if len(req.GetAudience()) == 0 {

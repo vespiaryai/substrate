@@ -81,6 +81,7 @@ func innerMetadata(leg, method, authority string, attrs map[string]string) *extp
 	fields := map[string]string{
 		extproc.FilterChainNameAttribute:             leg,
 		extproc.ActorIdentityFilterStateAttribute:    testActorSPIFFEID,
+		extproc.ActorUIDFilterStateAttribute:         testEgressActorUID,
 		extproc.ConnectAuthorityFilterStateAttribute: testDialed(leg),
 	}
 	if leg == extproc.EgressTLSMITMFilterChainName {
@@ -344,6 +345,24 @@ func TestRequestLegRequiresIdentity(t *testing.T) {
 			_, err := h.HandleRequestHeaders(context.Background(), md)
 			wantStatus(t, err, envoy_type.StatusCode_Forbidden)
 		})
+	}
+}
+
+func TestRequestLegRequiresActorUID(t *testing.T) {
+	client := &jwtControlClient{egressMockClient: &egressMockClient{
+		actor:  runningActor(),
+		policy: jwtInjectionPolicy(extproc.EgressCleartextFilterChainName, []string{"https://api.example.com"}),
+	}}
+	h := New(client, nil, 0, nil, "")
+	for _, uid := range []string{"", "forged-uid"} {
+		md := withAuthorization(innerMetadata(extproc.EgressCleartextFilterChainName, "GET", "api.example.com",
+			map[string]string{extproc.ActorUIDFilterStateAttribute: uid}))
+		md.Headers["x-actor-uid"] = testEgressActorUID
+		_, err := h.HandleRequestHeaders(context.Background(), md)
+		wantStatus(t, err, envoy_type.StatusCode_Forbidden)
+	}
+	if len(client.requests) != 0 {
+		t.Fatalf("mint calls = %d, want zero for missing or malformed UID", len(client.requests))
 	}
 }
 

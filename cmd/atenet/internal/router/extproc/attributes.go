@@ -49,6 +49,8 @@ const (
 	// ActorIdentityFilterStateAttribute is the CEL expression ext_proc
 	// evaluates to read ActorIdentityFilterStateKey back out.
 	ActorIdentityFilterStateAttribute = "filter_state['" + ActorIdentityFilterStateKey + "']"
+	ActorUIDFilterStateKey            = "dev.ate.actor.uid"
+	ActorUIDFilterStateAttribute      = "filter_state['" + ActorUIDFilterStateKey + "']"
 
 	// EgressMetadataNamespace is the dynamic-metadata namespace the CONNECT
 	// leg answers in. Envoy only keeps it when the outer ext_proc filter lists
@@ -58,6 +60,7 @@ const (
 	// actor dialed, set on every allowed CONNECT. The outer chain copies it
 	// into UpstreamDynamicPortFilterStateKey for the passthrough chain.
 	EgressDialedPortKey = "dialed_port"
+	EgressActorUIDKey   = "actor_uid"
 	// EgressPolicyMetadataNamespace holds the SNI rules returned on CONNECT.
 	// The outer chain copies it as JSON into filter state of the same name for
 	// the egress-policy module: {"rules": [{"pattern": ..., "mode": ...}]},

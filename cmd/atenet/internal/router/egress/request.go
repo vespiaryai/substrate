@@ -26,6 +26,7 @@ import (
 	"github.com/agent-substrate/substrate/cmd/atenet/internal/router/extproc"
 	"github.com/agent-substrate/substrate/internal/egresspolicy"
 	"github.com/agent-substrate/substrate/internal/resources"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 )
 
 // handleRequest authorizes one request the gateway can read: cleartext HTTP,
@@ -49,7 +50,7 @@ func (h *Handler) handleRequest(ctx context.Context, md *extproc.RequestMetadata
 			slog.Any("actor", ref), slog.String("leg", leg), slog.Any("err", err))
 		return extproc.Result{}, extproc.WrapReqError(envoy_type.StatusCode_Forbidden, err, deniedBody)
 	}
-	policy, err := h.lookupPolicy(ctx, leg, ref)
+	policy, err := h.lookupPolicy(ctx, leg, ref.Ref)
 	if err != nil {
 		return extproc.Result{}, err
 	}
@@ -171,10 +172,18 @@ func requestDestination(md *extproc.RequestMetadata) (egresspolicy.Destination, 
 
 // actorFromFilterState reads the actor from the identity filter state the
 // outer CONNECT chain set from the verified peer certificate.
-func actorFromFilterState(md *extproc.RequestMetadata) (resources.ActorRef, error) {
+func actorFromFilterState(md *extproc.RequestMetadata) (actorIncarnation, error) {
 	id := md.Attribute(extproc.ActorIdentityFilterStateAttribute)
 	if id == "" {
-		return resources.ActorRef{}, errors.New("no actor identity in filter state")
+		return actorIncarnation{}, errors.New("no actor identity in filter state")
 	}
-	return resources.ActorRefFromAteomForActorSPIFFEID(id)
+	ref, err := resources.ActorRefFromAteomForActorSPIFFEID(id)
+	if err != nil {
+		return actorIncarnation{}, err
+	}
+	uid := md.Attribute(extproc.ActorUIDFilterStateAttribute)
+	if len(resources.ValidateUUID(uid, field.NewPath("actor_uid"))) != 0 {
+		return actorIncarnation{}, errors.New("invalid actor UID in filter state")
+	}
+	return actorIncarnation{Ref: ref, UID: uid}, nil
 }

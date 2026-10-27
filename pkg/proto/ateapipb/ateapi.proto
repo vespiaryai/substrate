@@ -1711,6 +1711,13 @@ message MintActorJWTRequest {
   // +k8s:minimum=300
   // +k8s:maximum=3600
   int64 expiration_seconds = 8;
+
+  // The UID of the actor whose JWT may be minted. A recreated actor with the
+  // same name must not receive a token through an older incarnation.
+  //
+  // +k8s:required
+  // +k8s:format=k8s-uuid
+  string expected_actor_uid = 9;
 }
 
 // Response message for MintActorJWT.

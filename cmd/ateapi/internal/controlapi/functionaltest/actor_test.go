@@ -5101,6 +5101,25 @@ func TestMintActorJWT_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateActor failed: %v", err)
 	}
+	for _, check := range []struct {
+		name string
+		uid  string
+		code codes.Code
+	}{
+		{"missing UID", "", codes.InvalidArgument},
+		{"malformed UID", "invalid", codes.InvalidArgument},
+		{"stale UID", "12345678-1234-1234-1234-123456789abc", codes.Aborted},
+	} {
+		t.Run(check.name, func(t *testing.T) {
+			_, err := tc.client.MintActorJWT(t.Context(), &ateapipb.MintActorJWTRequest{
+				Actor:    &ateapipb.ObjectRef{Atespace: createResp.GetMetadata().GetAtespace(), Name: createResp.GetMetadata().GetName()},
+				Audience: []string{"foo"}, ExpirationSeconds: 1800, ExpectedActorUid: check.uid,
+			})
+			if got := status.Code(err); got != check.code {
+				t.Fatalf("MintActorJWT status = %v, want %v: %v", got, check.code, err)
+			}
+		})
+	}
 	mintResp, err := tc.client.MintActorJWT(t.Context(), &ateapipb.MintActorJWTRequest{
 		Actor: &ateapipb.ObjectRef{
 			Atespace: createResp.GetMetadata().GetAtespace(),
@@ -5108,6 +5127,7 @@ func TestMintActorJWT_Success(t *testing.T) {
 		},
 		Audience:          []string{"foo"},
 		ExpirationSeconds: 1800,
+		ExpectedActorUid:  createResp.GetMetadata().GetUid(),
 	})
 	if err != nil {
 		t.Fatalf("Error while calling MintActorJWT: %v", err)

@@ -261,6 +261,9 @@ func (c *jwtControlClient) MintActorJWT(ctx context.Context, req *ateapipb.MintA
 	if c.err != nil {
 		return nil, c.err
 	}
+	if req.GetExpectedActorUid() != c.actor.GetMetadata().GetUid() {
+		return nil, status.Error(codes.Aborted, "actor has been recreated")
+	}
 	if c.afterMint != nil {
 		c.afterMint()
 	}
@@ -288,28 +291,27 @@ func TestActorJWTInjection(t *testing.T) {
 	for _, leg := range []string{extproc.EgressTLSMITMFilterChainName, extproc.EgressCleartextFilterChainName} {
 		for _, audiences := range [][]string{{"https://api.example.com"}, {"https://api.example.com", "https://other.example.com"}, maxAudiences} {
 			actor := runningActor()
-			actor.Metadata.Uid = "old-uid"
+			actor.Metadata.Uid = testEgressActorUID
 			client := &jwtControlClient{egressMockClient: &egressMockClient{actor: actor, policy: jwtInjectionPolicy(leg, audiences)}}
 			h := New(client, nil, 0, nil, "")
 			md := withAuthorization(innerMetadata(leg, "GET", "api.example.com", nil))
-			for i, want := range []string{"Bearer old-uid-jwt", "Bearer new-uid-jwt"} {
-				if i == 1 {
-					client.actor.Metadata.Uid = "new-uid"
-				}
-				res, err := h.HandleRequestHeaders(context.Background(), md)
-				if err != nil {
-					t.Fatalf("request %d: %v", i, err)
-				}
-				got := res.Response.GetResponse().GetHeaderMutation().GetSetHeaders()
-				if len(got) != 1 || got[0].GetHeader().GetKey() != "authorization" || string(got[0].GetHeader().GetRawValue()) != want || got[0].GetAppendAction() != corev3.HeaderValueOption_OVERWRITE_IF_EXISTS_OR_ADD {
-					t.Fatalf("request %d mutation = %v, want authorization %q with overwrite", i, got, want)
-				}
+			want := "Bearer " + testEgressActorUID + "-jwt"
+			res, err := h.HandleRequestHeaders(context.Background(), md)
+			if err != nil {
+				t.Fatalf("request: %v", err)
 			}
+			got := res.Response.GetResponse().GetHeaderMutation().GetSetHeaders()
+			if len(got) != 1 || got[0].GetHeader().GetKey() != "authorization" || string(got[0].GetHeader().GetRawValue()) != want || got[0].GetAppendAction() != corev3.HeaderValueOption_OVERWRITE_IF_EXISTS_OR_ADD {
+				t.Fatalf("request mutation = %v, want authorization %q with overwrite", got, want)
+			}
+			client.actor.Metadata.Uid = "8b4e28ba-2fa1-11d2-883f-0016d3cca427"
+			_, err = h.HandleRequestHeaders(context.Background(), md)
+			wantStatus(t, err, envoy_type.StatusCode_Forbidden)
 			if len(client.requests) != 2 {
-				t.Fatalf("mint calls = %d, want 2 after same-name Actor recreation", len(client.requests))
+				t.Fatalf("mint calls = %d, want 2 including the denied old tunnel", len(client.requests))
 			}
 			for _, req := range client.requests {
-				if req.GetActor().GetAtespace() != "default" || req.GetActor().GetName() != "my-actor" || req.GetExpirationSeconds() != 900 || !slices.Equal(req.GetAudience(), audiences) {
+				if req.GetActor().GetAtespace() != "default" || req.GetActor().GetName() != "my-actor" || req.GetExpectedActorUid() != testEgressActorUID || req.GetExpirationSeconds() != 900 || !slices.Equal(req.GetAudience(), audiences) {
 					t.Fatalf("mint request = %v, want actor default/my-actor, audiences %v, expiry 900", req, audiences)
 				}
 			}
@@ -335,7 +337,7 @@ func TestActorJWTInjectionPrefix(t *testing.T) {
 				Header: "authorization", Prefix: tc.prefix,
 				ActorJwt: &ateapipb.ActorJWTSource{Audiences: []string{"https://api.example.com"}, ExpirationSeconds: 900},
 			}}}
-			got, err := h.applyEffects(context.Background(), testActorRef, egresspolicy.Destination{Hostname: "api.example.com"},
+			got, err := h.applyEffects(context.Background(), actorIncarnation{Ref: testActorRef, UID: testEgressActorUID}, egresspolicy.Destination{Hostname: "api.example.com"},
 				map[string]string{"authorization": "Bearer placeholder"}, effects)
 			if err != nil {
 				t.Fatal(err)
@@ -362,7 +364,7 @@ func TestActorJWTSuccessAfterCancellation(t *testing.T) {
 		{Header: "x-next-jwt", ActorJwt: &ateapipb.ActorJWTSource{Audiences: []string{"https://api.example.com"}, ExpirationSeconds: 900}},
 		{Header: "x-provider", CredentialUri: "ate-secret://k8s/default/token"},
 	}}
-	mutations, err := h.applyEffects(ctx, testActorRef, egresspolicy.Destination{Hostname: "api.example.com"},
+	mutations, err := h.applyEffects(ctx, actorIncarnation{Ref: testActorRef, UID: testEgressActorUID}, egresspolicy.Destination{Hostname: "api.example.com"},
 		map[string]string{"authorization": "placeholder", "x-next-jwt": "placeholder", "x-provider": "placeholder"}, effects)
 	wantStatus(t, err, envoy_type.StatusCode_RequestTimeout)
 	if mutations != nil || len(client.requests) != 1 || provider.got != nil {

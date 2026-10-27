@@ -40,10 +40,12 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 
 	"github.com/agent-substrate/substrate/cmd/atenet/internal/router/extproc"
 	"github.com/agent-substrate/substrate/internal/egresspolicy"
 	"github.com/agent-substrate/substrate/internal/resources"
+	"github.com/agent-substrate/substrate/internal/substratex509"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"github.com/agent-substrate/substrate/pkg/proto/credproviderpb"
 )
@@ -91,6 +93,11 @@ type Handler struct {
 	// its ate-secret:// credential URIs); a credential URI naming another
 	// provider is refused.
 	providerName string
+}
+
+type actorIncarnation struct {
+	Ref resources.ActorRef
+	UID string
 }
 
 // New builds the egress handler. actorIdentityRoots is the egress listener's
@@ -165,7 +172,7 @@ func (h *Handler) handleConnect(ctx context.Context, md *extproc.RequestMetadata
 		return extproc.Result{}, err
 	}
 
-	ref := resources.ActorRef{Atespace: actorRef.Atespace, Name: actorRef.Name}
+	ref := actorRef.Ref
 
 	// atunnel always sends the address the actor's kernel dialed, never a
 	// name. Refuse a name here, where there is still a response to do it with.
@@ -185,14 +192,14 @@ func (h *Handler) handleConnect(ctx context.Context, md *extproc.RequestMetadata
 	slog.InfoContext(ctx, "egress tunnel opened: requests inside it are decided one by one",
 		slog.Any("actor", ref), slog.String("leg", leg), slog.String("destination", md.Host), slog.Int("sniRules", len(rules)))
 	res := allow()
-	res.DynamicMetadata = connectMetadata(dest, rules)
+	res.DynamicMetadata = connectMetadata(dest, rules, actorRef.UID)
 	return res, nil
 }
 
 // connectMetadata encodes the SNI rules for EgressPolicyMetadataNamespace and
 // the dialed port for EgressMetadataNamespace. The port is always set: without
 // it the passthrough chain falls back to its configured port instead of closing.
-func connectMetadata(dest egresspolicy.Destination, rules []egresspolicy.SNIRule) *structpb.Struct {
+func connectMetadata(dest egresspolicy.Destination, rules []egresspolicy.SNIRule, actorUID string) *structpb.Struct {
 	values := make([]*structpb.Value, len(rules))
 	for i, rule := range rules {
 		values[i] = structpb.NewStructValue(&structpb.Struct{Fields: map[string]*structpb.Value{
@@ -203,6 +210,7 @@ func connectMetadata(dest egresspolicy.Destination, rules []egresspolicy.SNIRule
 	return &structpb.Struct{Fields: map[string]*structpb.Value{
 		extproc.EgressMetadataNamespace: structpb.NewStructValue(&structpb.Struct{Fields: map[string]*structpb.Value{
 			extproc.EgressDialedPortKey: structpb.NewStringValue(strconv.Itoa(int(dest.Port))),
+			extproc.EgressActorUIDKey:   structpb.NewStringValue(actorUID),
 		}}),
 		extproc.EgressPolicyMetadataNamespace: structpb.NewStructValue(&structpb.Struct{Fields: map[string]*structpb.Value{
 			extproc.EgressSNIRulesKey: structpb.NewListValue(&structpb.ListValue{Values: values}),
@@ -257,20 +265,23 @@ func (h *Handler) lookupPolicy(ctx context.Context, leg string, ref resources.Ac
 // validateActor checks the actor certified by the certificate against the control
 // plane's current view of that actor: it still exists and it is running. Every
 // error it returns is already a client-facing ext_proc denial.
-func (h *Handler) validateActor(ctx context.Context, actorRef resources.ActorRef) error {
+func (h *Handler) validateActor(ctx context.Context, identity actorIncarnation) error {
 	// Confirm the certified actor still exists.
 	// TODO: this can cause heavy load on ate api server. Change it based on https://github.com/agent-substrate/substrate/issues/592.
 	actor, err := h.apiClient.GetActor(ctx, &ateapipb.GetActorRequest{
-		Actor: &ateapipb.ObjectRef{Atespace: actorRef.Atespace, Name: actorRef.Name},
+		Actor: identity.Ref.ToObjectRef(),
 	})
 	if err != nil {
-		return mapEgressIdentityError(actorRef.Atespace, actorRef.Name, err)
+		return mapEgressIdentityError(identity.Ref.Atespace, identity.Ref.Name, err)
+	}
+	if actor.GetMetadata().GetUid() != identity.UID {
+		return extproc.NewReqError(envoy_type.StatusCode_Forbidden, deniedBody)
 	}
 
 	// The actor performing egress must actually be running.
 	if actor.GetStatus().GetState() != ateapipb.ActorState_ACTOR_STATE_RUNNING {
 		return extproc.NewReqError(envoy_type.StatusCode_Forbidden,
-			"egress denied: actor %q/%q is %s, not running", actorRef.Atespace, actorRef.Name, actor.GetStatus().GetState())
+			"egress denied: actor %q/%q is %s, not running", identity.Ref.Atespace, identity.Ref.Name, actor.GetStatus().GetState())
 	}
 	return nil
 }
@@ -278,21 +289,21 @@ func (h *Handler) validateActor(ctx context.Context, actorRef resources.ActorRef
 // authenticateActorCertificate turns the mTLS peer certificate Envoy recorded
 // on the request into a verified ActorRef, or an error describing why it
 // cannot be trusted.
-func (h *Handler) authenticateActorCertificate(md *extproc.RequestMetadata) (resources.ActorRef, error) {
+func (h *Handler) authenticateActorCertificate(md *extproc.RequestMetadata) (actorIncarnation, error) {
 	if certificate := md.Attribute(agentgatewayClientCertificateAttribute); certificate != "" {
 		chain, err := parseCertificateChainPEM([]byte(certificate))
 		if err != nil {
-			return resources.ActorRef{}, err
+			return actorIncarnation{}, err
 		}
 		return h.verifyActorCertificate(chain)
 	}
 	header := md.Header(forwardedClientCertHeader)
 	if header == "" {
-		return resources.ActorRef{}, fmt.Errorf("request carries no %s header", forwardedClientCertHeader)
+		return actorIncarnation{}, fmt.Errorf("request carries no %s header", forwardedClientCertHeader)
 	}
 	chain, err := parseXFCCChain(header)
 	if err != nil {
-		return resources.ActorRef{}, err
+		return actorIncarnation{}, err
 	}
 	return h.verifyActorCertificate(chain)
 }
@@ -308,7 +319,10 @@ func (h *Handler) authenticateActorCertificate(md *extproc.RequestMetadata) (res
 // It also keeps the handler safe if the Envoy config is ever loosened, and costs
 // one signature check per CONNECT rather than per request. The IsCA, ClientAuth-EKU,
 // and ateom SPIFFE URI checks below have no Envoy-side equivalent at all.
-func (h *Handler) verifyActorCertificate(chain []*x509.Certificate) (resources.ActorRef, error) {
+func (h *Handler) verifyActorCertificate(chain []*x509.Certificate) (actorIncarnation, error) {
+	if len(chain) == 0 {
+		return actorIncarnation{}, fmt.Errorf("actor certificate chain is empty")
+	}
 	leaf := chain[0]
 	intermediates := x509.NewCertPool()
 	for _, cert := range chain[1:] {
@@ -317,14 +331,14 @@ func (h *Handler) verifyActorCertificate(chain []*x509.Certificate) (resources.A
 
 	now := time.Now()
 	if now.Before(leaf.NotBefore) || !now.Before(leaf.NotAfter) {
-		return resources.ActorRef{}, fmt.Errorf("actor certificate is outside its validity period (%s..%s)",
+		return actorIncarnation{}, fmt.Errorf("actor certificate is outside its validity period (%s..%s)",
 			leaf.NotBefore.Format(time.RFC3339), leaf.NotAfter.Format(time.RFC3339))
 	}
 	// An actor certificate is an end-entity credential. Refusing IsCA here stops
 	// a leaked or mis-issued CA certificate from being replayed as a leaf: chain
 	// verification alone would happily accept one.
 	if leaf.IsCA {
-		return resources.ActorRef{}, fmt.Errorf("actor certificate is a CA certificate")
+		return actorIncarnation{}, fmt.Errorf("actor certificate is a CA certificate")
 	}
 
 	if _, err := leaf.Verify(x509.VerifyOptions{
@@ -333,19 +347,32 @@ func (h *Handler) verifyActorCertificate(chain []*x509.Certificate) (resources.A
 		CurrentTime:   now,
 		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 	}); err != nil {
-		return resources.ActorRef{}, fmt.Errorf("actor certificate is not signed by the actor-identity CA: %w", err)
+		return actorIncarnation{}, fmt.Errorf("actor certificate is not signed by the actor-identity CA: %w", err)
 	}
 
 	// Check that this is an ateom certificate --- the SPIFFE URI should be of
 	// the form `spiffe://${trustdomain}/ateom-for-actor/${atespace}/${actor}`.
 	if len(leaf.URIs) != 1 {
-		return resources.ActorRef{}, fmt.Errorf("actor certificate has %d URI SANs, want 1", len(leaf.URIs))
+		return actorIncarnation{}, fmt.Errorf("actor certificate has %d URI SANs, want 1", len(leaf.URIs))
 	}
 	ref, err := resources.ActorRefFromAteomForActorSPIFFEURL(leaf.URIs[0])
 	if err != nil {
-		return resources.ActorRef{}, fmt.Errorf("while parsing actor from SPIFFE ID: %w", err)
+		return actorIncarnation{}, fmt.Errorf("while parsing actor from SPIFFE ID: %w", err)
 	}
-	return ref, nil
+	identity, err := substratex509.ActorIdentityFromCertificate(leaf)
+	if err != nil {
+		return actorIncarnation{}, fmt.Errorf("while reading actor identity extension: %w", err)
+	}
+	if identity == nil {
+		return actorIncarnation{}, fmt.Errorf("actor certificate lacks actor identity extension")
+	}
+	if identity.Atespace != ref.Atespace || identity.ActorName != ref.Name {
+		return actorIncarnation{}, fmt.Errorf("actor identity extension disagrees with URI SAN")
+	}
+	if len(resources.ValidateUUID(identity.ActorUid, field.NewPath("actor_uid"))) != 0 {
+		return actorIncarnation{}, fmt.Errorf("actor identity extension contains invalid UID")
+	}
+	return actorIncarnation{Ref: ref, UID: identity.ActorUid}, nil
 }
 
 // parseXFCCChain extracts the presented certificate chain, leaf first, from an

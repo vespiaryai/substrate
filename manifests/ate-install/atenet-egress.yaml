@@ -242,6 +242,14 @@ data:
                       text_format_source:
                         inline_string: "%DYNAMIC_METADATA(dev.ate.egress:dialed_port)%"
                       omit_empty_values: true
+                  - object_key: dev.ate.actor.uid
+                    factory_key: envoy.string
+                    skip_if_empty: true
+                    shared_with_upstream: ONCE
+                    format_string:
+                      text_format_source:
+                        inline_string: "%DYNAMIC_METADATA(dev.ate.egress:actor_uid)%"
+                      omit_empty_values: true
                   # SNI rules for the egress-policy module. If absent, all TLS
                   # is denied.
                   - object_key: dev.ate.policy.egress
@@ -517,6 +525,7 @@ data:
                   request_attributes:
                   - xds.filter_chain_name
                   - filter_state['dev.ate.actor.identity']
+                  - filter_state['dev.ate.actor.uid']
                   - filter_state['dev.ate.connect.authority']
                   - filter_state['envoy.network.transport_socket.original_dst_address'].ip
                   - filter_state['envoy.network.transport_socket.original_dst_address'].port
@@ -699,6 +708,7 @@ data:
                   request_attributes:
                   - xds.filter_chain_name
                   - filter_state['dev.ate.actor.identity']
+                  - filter_state['dev.ate.actor.uid']
                   - filter_state['dev.ate.connect.authority']
                   - filter_state['envoy.network.transport_socket.original_dst_address'].ip
                   - filter_state['envoy.network.transport_socket.original_dst_address'].port

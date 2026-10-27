@@ -139,8 +139,9 @@ func TestMintAteomActorCertificate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ActorIdentityFromCertificate: %v", err)
 	}
-	if identity != nil {
-		t.Errorf("ActorIdentity = %+v, want nil (ateom certificates should not carry ActorIdentity)", identity)
+	want := &substratex509.ActorIdentity{Atespace: "team-a", ActorName: "my-actor", ActorUid: actor.GetMetadata().GetUid()}
+	if identity == nil || *identity != *want {
+		t.Errorf("ActorIdentity = %+v, want %+v", identity, want)
 	}
 }
 

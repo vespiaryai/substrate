@@ -5383,8 +5383,14 @@ type MintActorJWTRequest struct {
 	// +k8s:minimum=300
 	// +k8s:maximum=3600
 	ExpirationSeconds int64 `protobuf:"varint,8,opt,name=expiration_seconds,json=expirationSeconds,proto3" json:"expiration_seconds,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// The UID of the actor whose JWT may be minted. A recreated actor with the
+	// same name must not receive a token through an older incarnation.
+	//
+	// +k8s:required
+	// +k8s:format=k8s-uuid
+	ExpectedActorUid string `protobuf:"bytes,9,opt,name=expected_actor_uid,json=expectedActorUid,proto3" json:"expected_actor_uid,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *MintActorJWTRequest) Reset() {
@@ -5436,6 +5442,13 @@ func (x *MintActorJWTRequest) GetExpirationSeconds() int64 {
 		return x.ExpirationSeconds
 	}
 	return 0
+}
+
+func (x *MintActorJWTRequest) GetExpectedActorUid() string {
+	if x != nil {
+		return x.ExpectedActorUid
+	}
+	return ""
 }
 
 // Response message for MintActorJWT.
@@ -8310,11 +8323,12 @@ const file_ateapi_proto_rawDesc = "" +
 	"\x05actor\x18\x01 \x01(\v2\x11.ateapi.ObjectRefR\x05actor\x12/\n" +
 	"\aoptions\x18\x02 \x01(\v2\x15.ateapi.DeleteOptionsR\aoptions\"4\n" +
 	"\rGetTagRequest\x12#\n" +
-	"\x03tag\x18\x01 \x01(\v2\x11.ateapi.ObjectRefR\x03tag\"\x89\x01\n" +
+	"\x03tag\x18\x01 \x01(\v2\x11.ateapi.ObjectRefR\x03tag\"\xb7\x01\n" +
 	"\x13MintActorJWTRequest\x12'\n" +
 	"\x05actor\x18\x05 \x01(\v2\x11.ateapi.ObjectRefR\x05actor\x12\x1a\n" +
 	"\baudience\x18\x01 \x03(\tR\baudience\x12-\n" +
-	"\x12expiration_seconds\x18\b \x01(\x03R\x11expirationSeconds\"s\n" +
+	"\x12expiration_seconds\x18\b \x01(\x03R\x11expirationSeconds\x12,\n" +
+	"\x12expected_actor_uid\x18\t \x01(\tR\x10expectedActorUid\"s\n" +
 	"\x14MintActorJWTResponse\x12 \n" +
 	"\tactor_jwt\x18\x01 \x01(\tB\x03\x80\x01\x01R\bactorJwt\x129\n" +
 	"\n" +

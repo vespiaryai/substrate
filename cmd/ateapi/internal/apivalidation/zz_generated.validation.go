@@ -5883,6 +5883,38 @@ func Validate_MintActorJWTRequest(
 		errs = append(errs, fn(fldPath.Child("expiration_seconds"), &obj.ExpirationSeconds, oldVal, oldObj != nil)...)
 	}
 
+	{ // field ateapipb.MintActorJWTRequest.ExpectedActorUid
+		fn := func(
+			fldPath *field.Path,
+			obj, oldObj *string,
+			oldValueCorrelated bool) (errs field.ErrorList) {
+			// don't revalidate unchanged data
+			if oldValueCorrelated && op.Type == operation.Update {
+				if obj == oldObj || (obj != nil && oldObj != nil && *obj == *oldObj) {
+					return nil
+				}
+			}
+			// call field-attached validations
+			earlyReturn := false
+			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
+				errs = append(errs, e...)
+				earlyReturn = true
+			}
+			if earlyReturn {
+				return // do not proceed
+			}
+			if e := validate.UUID(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+				errs = append(errs, e...)
+			}
+			return
+		}
+		oldVal := safe.Field(oldObj,
+			func(oldObj *ateapipb.MintActorJWTRequest) *string {
+				return &oldObj.ExpectedActorUid
+			})
+		errs = append(errs, fn(fldPath.Child("expected_actor_uid"), &obj.ExpectedActorUid, oldVal, oldObj != nil)...)
+	}
+
 	return errs
 }
 

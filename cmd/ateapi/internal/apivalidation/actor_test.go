@@ -1018,9 +1018,11 @@ func TestValidateMintActorJWTRequest(t *testing.T) {
 			Actor:             &ateapipb.ObjectRef{Atespace: "ns1", Name: "id1"},
 			Audience:          []string{"https://example.com"},
 			ExpirationSeconds: seconds,
+			ExpectedActorUid:  "12345678-1234-1234-1234-123456789abc",
 		}
 	}
 	path := field.NewPath("expiration_seconds")
+	uidPath := field.NewPath("expected_actor_uid")
 	tests := []struct {
 		name string
 		req  *ateapipb.MintActorJWTRequest
@@ -1032,6 +1034,12 @@ func TestValidateMintActorJWTRequest(t *testing.T) {
 		{name: "negative expiration", req: withExpiration(-1), want: field.ErrorList{field.Invalid(path, int64(-1), "").WithOrigin("minimum")}},
 		{name: "expiration below minimum", req: withExpiration(299), want: field.ErrorList{field.Invalid(path, int64(299), "").WithOrigin("minimum")}},
 		{name: "expiration above maximum", req: withExpiration(3601), want: field.ErrorList{field.Invalid(path, int64(3601), "").WithOrigin("maximum")}},
+		{name: "missing UID", req: func() *ateapipb.MintActorJWTRequest { r := withExpiration(300); r.ExpectedActorUid = ""; return r }(), want: field.ErrorList{field.Required(uidPath, "")}},
+		{name: "malformed UID", req: func() *ateapipb.MintActorJWTRequest {
+			r := withExpiration(300)
+			r.ExpectedActorUid = "invalid"
+			return r
+		}(), want: field.ErrorList{field.Invalid(uidPath, "invalid", "").WithOrigin("format=k8s-uuid")}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

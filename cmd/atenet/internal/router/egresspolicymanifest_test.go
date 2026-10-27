@@ -209,8 +209,8 @@ func extProcOf(chain node) (node, int, []node) {
 func TestEgressManifestsExtProcFilters(t *testing.T) {
 	required := map[string][]string{
 		extproc.EgressFilterChainName:          {extproc.FilterChainNameAttribute},
-		extproc.EgressCleartextFilterChainName: {extproc.FilterChainNameAttribute, extproc.ActorIdentityFilterStateAttribute, extproc.ConnectAuthorityFilterStateAttribute, extproc.OriginalDstIPAttribute, extproc.OriginalDstPortAttribute},
-		extproc.EgressTLSMITMFilterChainName:   {extproc.FilterChainNameAttribute, extproc.ActorIdentityFilterStateAttribute, extproc.ConnectAuthorityFilterStateAttribute, extproc.OriginalDstIPAttribute, extproc.OriginalDstPortAttribute},
+		extproc.EgressCleartextFilterChainName: {extproc.FilterChainNameAttribute, extproc.ActorIdentityFilterStateAttribute, extproc.ActorUIDFilterStateAttribute, extproc.ConnectAuthorityFilterStateAttribute, extproc.OriginalDstIPAttribute, extproc.OriginalDstPortAttribute},
+		extproc.EgressTLSMITMFilterChainName:   {extproc.FilterChainNameAttribute, extproc.ActorIdentityFilterStateAttribute, extproc.ActorUIDFilterStateAttribute, extproc.ConnectAuthorityFilterStateAttribute, extproc.OriginalDstIPAttribute, extproc.OriginalDstPortAttribute},
 	}
 	for _, path := range egressManifests {
 		t.Run(path, func(t *testing.T) {
@@ -315,8 +315,18 @@ func TestEgressManifestsOriginalDstClustersDialTheFilterStateAlone(t *testing.T)
 func TestEgressManifestsShareIdentityWithTheInnerListener(t *testing.T) {
 	for _, path := range egressManifests {
 		t.Run(path, func(t *testing.T) {
-			var identity, authority node
-			for _, f := range list(hcm(outerChain(t, bootstrapTree(t, path))), "http_filters") {
+			var identity, authority, uid node
+			tree := bootstrapTree(t, path)
+			outer := outerChain(t, tree)
+			if got := str(hcm(outer), "forward_client_cert_details"); got != "SANITIZE_SET" {
+				t.Errorf("CONNECT XFCC handling = %q, want SANITIZE_SET", got)
+			}
+			if chain, _ := child(hcm(outer), "set_current_client_cert_details")["chain"].(bool); !chain {
+				t.Error("CONNECT must replace XFCC with the verified certificate chain")
+			}
+			filters := list(hcm(outer), "http_filters")
+			uidWriterIndex := -1
+			for i, f := range filters {
 				if str(f, "name") != setFilterStateFilter {
 					continue
 				}
@@ -324,6 +334,9 @@ func TestEgressManifestsShareIdentityWithTheInnerListener(t *testing.T) {
 					switch str(v, "object_key") {
 					case extproc.ActorIdentityFilterStateKey:
 						identity = v
+					case extproc.ActorUIDFilterStateKey:
+						uid = v
+						uidWriterIndex = i
 					case extproc.ConnectAuthorityFilterStateKey:
 						authority = v
 					}
@@ -334,6 +347,40 @@ func TestEgressManifestsShareIdentityWithTheInnerListener(t *testing.T) {
 			}
 			if got := str(identity, "shared_with_upstream"); got == "" {
 				t.Errorf("%s is not shared with upstream; the inner legs would see no actor", extproc.ActorIdentityFilterStateKey)
+			}
+			if uid == nil {
+				t.Fatalf("the egress chain never sets %s", extproc.ActorUIDFilterStateKey)
+			}
+			if uidWriterIndex <= filterIndex(filters, extProcFilter) {
+				t.Error("CONNECT ext_proc must precede the UID filter state writer")
+			}
+			if got := str(uid, "shared_with_upstream"); got != "ONCE" {
+				t.Errorf("UID filter state shared_with_upstream = %q, want ONCE", got)
+			}
+			if got := str(uid, "factory_key"); got != "envoy.string" {
+				t.Errorf("UID filter state factory_key = %q, want envoy.string", got)
+			}
+			if skip, _ := uid["skip_if_empty"].(bool); !skip {
+				t.Error("UID filter state must skip an empty value")
+			}
+			format := child(uid, "format_string")
+			if got := str(child(format, "text_format_source"), "inline_string"); got != "%DYNAMIC_METADATA(dev.ate.egress:actor_uid)%" {
+				t.Errorf("UID filter state source = %q", got)
+			}
+			if omit, _ := format["omit_empty_values"].(bool); !omit {
+				t.Error("UID filter state must omit an empty value")
+			}
+			for _, lc := range allChains(tree) {
+				if str(lc.chain, "name") == extproc.EgressFilterChainName {
+					continue
+				}
+				for _, f := range list(hcm(lc.chain), "http_filters") {
+					for _, v := range list(child(f, "typed_config"), "on_request_headers") {
+						if str(v, "object_key") == extproc.ActorUIDFilterStateKey {
+							t.Errorf("chain %q can overwrite the CONNECT actor UID", str(lc.chain, "name"))
+						}
+					}
+				}
 			}
 			// The dialed port rides along the same way; without it the request
 			// legs cannot enforce a rule's ports.

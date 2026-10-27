@@ -43,6 +43,41 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation/field"
 )
 
+type mintActorStore struct {
+	store.Interface
+	actor *ateapipb.Actor
+}
+
+func (s *mintActorStore) GetActor(context.Context, resources.ActorRef) (*ateapipb.Actor, error) {
+	return s.actor, nil
+}
+
+func TestMintActorJWTRequiresCurrentUID(t *testing.T) {
+	actor := &ateapipb.Actor{Metadata: &ateapipb.ResourceMetadata{
+		Atespace: "team-a", Name: "my-actor", Uid: "3b9f1e77-2c4d-4a80-91be-6d5c8f0a7e21",
+	}}
+	s := &RPCService{impl: newServiceImpl(&mintActorStore{actor: actor}, nil)}
+	for _, check := range []struct {
+		name string
+		uid  string
+		code codes.Code
+	}{
+		{"missing", "", codes.InvalidArgument},
+		{"malformed", "invalid", codes.InvalidArgument},
+		{"stale", "12345678-1234-1234-1234-123456789abc", codes.Aborted},
+	} {
+		t.Run(check.name, func(t *testing.T) {
+			_, err := s.MintActorJWT(t.Context(), &ateapipb.MintActorJWTRequest{
+				Actor:    &ateapipb.ObjectRef{Atespace: "team-a", Name: "my-actor"},
+				Audience: []string{"https://example.com"}, ExpirationSeconds: 900, ExpectedActorUid: check.uid,
+			})
+			if got := apierror.Code(err); got != check.code {
+				t.Fatalf("MintActorJWT code = %v, want %v: %v", got, check.code, err)
+			}
+		})
+	}
+}
+
 func TestValidateActorStatusCrash(t *testing.T) {
 	crashPath := field.NewPath("status", "crash")
 	withCrash := func(mutate ...func(*ateapipb.ActorCrash)) func(*ateapipb.Actor) {
