@@ -1291,6 +1291,7 @@ spec:
             cpu: 200m
             memory: 512Mi
           limits:
+            cpu: 200m
             memory: 768Mi
         securityContext:
           allowPrivilegeEscalation: false
@@ -1312,11 +1313,19 @@ spec:
         image: ${ENVOY_DATAPLANE_IMAGE}
         securityContext:
           allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
           capabilities:
             drop:
             - ALL
           runAsNonRoot: true
           runAsUser: 65532
+        resources:
+          requests:
+            cpu: 150m
+            memory: 768Mi
+          limits:
+            cpu: 150m
+            memory: 1536Mi
         args:
         - -c
         - /etc/envoy/envoy.yaml
@@ -1391,6 +1400,18 @@ spec:
       # serve both directions with --mode=all.
       - name: ext-proc
         image: ko://github.com/agent-substrate/substrate/cmd/atenet
+        resources:
+          requests:
+            cpu: 150m
+            memory: 256Mi
+          limits:
+            cpu: 150m
+            memory: 384Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
         args:
         - router
         - --mode=egress
