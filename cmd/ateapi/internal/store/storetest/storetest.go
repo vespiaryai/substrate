@@ -23,6 +23,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -35,6 +36,9 @@ import (
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store/dockerenv"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/network"
+	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 )
 
@@ -167,14 +171,51 @@ func requireAdminPool(t *testing.T) *pgxpool.Pool {
 			containerErr = err
 			return
 		}
+		const memoryLimit = int64(512 << 20)
+		const cpuLimit = int64(500_000_000)
+		const pidsLimit = int64(128)
+		port := network.MustParsePort("5432/tcp")
+		loopback := netip.MustParseAddr("127.0.0.1")
+		owner := os.Getenv("ATE_TEST_POSTGRES_OWNER")
+		if owner == "" {
+			owner = fmt.Sprintf("pid-%d", os.Getpid())
+		}
 		containerPG, containerErr = postgres.Run(ctx, "postgres:18-alpine",
 			postgres.WithDatabase("postgres"),
 			postgres.WithUsername("postgres"),
 			postgres.WithPassword("postgres"),
+			testcontainers.WithLabels(map[string]string{"ate.test.postgres.owner": owner}),
+			testcontainers.WithHostConfigModifier(func(host *container.HostConfig) {
+				host.Resources.NanoCPUs = cpuLimit
+				host.Resources.Memory = memoryLimit
+				host.Resources.MemorySwap = memoryLimit
+				host.Resources.PidsLimit = new(int64)
+				*host.Resources.PidsLimit = pidsLimit
+				host.PortBindings = network.PortMap{port: {{HostIP: loopback, HostPort: "0"}}}
+			}),
 		)
 		if containerErr != nil {
 			return
 		}
+		inspect, err := containerPG.Inspect(ctx)
+		if err != nil {
+			containerErr = fmt.Errorf("inspecting PostgreSQL testcontainer: %w", err)
+			return
+		}
+		if inspect.HostConfig == nil || inspect.Config == nil || inspect.NetworkSettings == nil ||
+			inspect.HostConfig.Resources.NanoCPUs != cpuLimit ||
+			inspect.HostConfig.Resources.Memory != memoryLimit ||
+			inspect.HostConfig.Resources.MemorySwap != memoryLimit ||
+			inspect.HostConfig.Resources.PidsLimit == nil || *inspect.HostConfig.Resources.PidsLimit != pidsLimit ||
+			inspect.Config.Labels["ate.test.postgres.owner"] != owner ||
+			len(inspect.HostConfig.PortBindings[port]) != 1 || inspect.HostConfig.PortBindings[port][0].HostIP != loopback ||
+			len(inspect.NetworkSettings.Ports[port]) != 1 || inspect.NetworkSettings.Ports[port][0].HostIP != loopback {
+			containerErr = fmt.Errorf("PostgreSQL testcontainer resource or loopback binding readback differs from the bounded fixture")
+			return
+		}
+		fmt.Fprintf(os.Stderr, "PostgreSQL testcontainer %s: CPU=%d memory=%d swap=%d pids=%d loopback=%s\n",
+			inspect.ID, inspect.HostConfig.Resources.NanoCPUs, inspect.HostConfig.Resources.Memory,
+			inspect.HostConfig.Resources.MemorySwap, *inspect.HostConfig.Resources.PidsLimit, inspect.NetworkSettings.Ports[port][0].HostIP)
 		dsn, err := containerPG.ConnectionString(ctx, "sslmode=disable")
 		if err != nil {
 			containerErr = err
