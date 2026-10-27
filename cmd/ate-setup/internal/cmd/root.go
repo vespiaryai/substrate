@@ -59,6 +59,8 @@ var resolved *config.Resolved
 // Commands that install nothing -- delete, publish, setup -- are not marked.
 const recordAnnotation = "record"
 
+const jsonOutputAnnotation = "json-output"
+
 // recordsRun reports whether the nearest annotated command, cmd or an
 // ancestor, opted in.
 func recordsRun(cmd *cobra.Command) bool {
@@ -102,6 +104,7 @@ is present (skipped for --kind, and by NO_DEV_ENV=1).`,
 			return err
 		}
 		resolved = cfg.Resolved()
+		routeCommandOutput(cmd)
 
 		// Reported before the cluster is touched, so the settings are on
 		// screen even when connecting fails.
@@ -128,6 +131,12 @@ is present (skipped for --kind, and by NO_DEV_ENV=1).`,
 		recordRun(cmd, nil)
 		return nil
 	},
+}
+
+func routeCommandOutput(cmd *cobra.Command) {
+	if cmd.Annotations[jsonOutputAnnotation] == "yes" {
+		log.SetOutput(cmd.ErrOrStderr())
+	}
 }
 
 // recordRun writes what this run used, so the next one can reproduce it by

@@ -48,7 +48,7 @@ func (c *Config) EnsureClusterCredentials(ctx context.Context) error {
 		"--project", c.ProjectID,
 	)
 	cmd.Env = c.ScriptEnv()
-	cmd.Stdout = os.Stdout
+	cmd.Stdout = log.Writer()
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("while fetching credentials for cluster %s: %w", c.ClusterName, err)

@@ -30,7 +30,7 @@ func init() {
 	s3 := &cobra.Command{Use: "s3", Short: "Rotate the k3s S3 client trust and endpoint"}
 	var expectedPath, caPath, receiptPath string
 	var clients []string
-	inspect := &cobra.Command{Use: "inspect", Short: "Print the current S3 rotation identities as JSON", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	inspect := &cobra.Command{Use: "inspect", Short: "Print the current S3 rotation identities as JSON", Annotations: map[string]string{jsonOutputAnnotation: "yes"}, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		inventory := make([]steps.S3RotationClient, 0, len(clients))
 		for _, client := range clients {
 			name, uid, ok := strings.Cut(client, "=")
