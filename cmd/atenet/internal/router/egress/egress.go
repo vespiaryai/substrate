@@ -262,9 +262,6 @@ func (h *Handler) lookupPolicy(ctx context.Context, leg string, ref resources.Ac
 	return policy, nil
 }
 
-// validateActor checks the actor certified by the certificate against the control
-// plane's current view of that actor: it still exists and it is running. Every
-// error it returns is already a client-facing ext_proc denial.
 func (h *Handler) validateActor(ctx context.Context, identity actorIncarnation) error {
 	// Confirm the certified actor still exists.
 	// TODO: this can cause heavy load on ate api server. Change it based on https://github.com/agent-substrate/substrate/issues/592.
@@ -286,9 +283,6 @@ func (h *Handler) validateActor(ctx context.Context, identity actorIncarnation) 
 	return nil
 }
 
-// authenticateActorCertificate turns the mTLS peer certificate Envoy recorded
-// on the request into a verified ActorRef, or an error describing why it
-// cannot be trusted.
 func (h *Handler) authenticateActorCertificate(md *extproc.RequestMetadata) (actorIncarnation, error) {
 	if certificate := md.Attribute(agentgatewayClientCertificateAttribute); certificate != "" {
 		chain, err := parseCertificateChainPEM([]byte(certificate))
@@ -308,10 +302,6 @@ func (h *Handler) authenticateActorCertificate(md *extproc.RequestMetadata) (act
 	return h.verifyActorCertificate(chain)
 }
 
-// verifyActorCertificate checks that chain[0] is a live, non-CA, client-auth
-// ateom actor certificate issued by the actor-identity CA, and returns the
-// ActorRef from its SPIFFE URI.
-//
 // The chain is verified here even though Envoy already did it at the handshake
 // (require_client_certificate with the actor-identity CA as trusted_ca). We have
 // to parse the certificate anyway to inspect its SPIFFE URI and usages, and

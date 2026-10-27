@@ -310,8 +310,6 @@ func TestEgressManifestsOriginalDstClustersDialTheFilterStateAlone(t *testing.T)
 	}
 }
 
-// The identity and the dialed authority cross the inner hop as filter state
-// shared with the upstream; nothing else carries them.
 func TestEgressManifestsShareIdentityWithTheInnerListener(t *testing.T) {
 	for _, path := range egressManifests {
 		t.Run(path, func(t *testing.T) {

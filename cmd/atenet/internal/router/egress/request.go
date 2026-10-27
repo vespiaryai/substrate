@@ -170,8 +170,6 @@ func requestDestination(md *extproc.RequestMetadata) (egresspolicy.Destination, 
 	return dest, nil
 }
 
-// actorFromFilterState reads the actor from the identity filter state the
-// outer CONNECT chain set from the verified peer certificate.
 func actorFromFilterState(md *extproc.RequestMetadata) (actorIncarnation, error) {
 	id := md.Attribute(extproc.ActorIdentityFilterStateAttribute)
 	if id == "" {
