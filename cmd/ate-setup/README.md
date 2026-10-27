@@ -44,19 +44,26 @@ changing the cluster. The configuration must still name the installed old S3
 endpoint.
 
 ```
-ate-setup --config /absolute/install.yaml rotate s3 inspect > /absolute/expected.json
+ate-setup --config /absolute/install.yaml rotate s3 inspect \
+  --client Deployment/ate-api-server=API_UID \
+  --client DaemonSet/ATELET_NAME=ATELET_UID \
+  > /absolute/expected.json
 ate-setup --config /absolute/install.yaml rotate s3 trust \
   --expected /absolute/expected.json \
   --ca-file /absolute/old-and-new-public-roots.pem \
   --rotation-receipt /absolute/new-rotation-receipt.json
 ```
 
+Pass every installed `app=atelet` DaemonSet to `inspect`, after verifying each
+name and UID independently. Recheck the live UIDs before running `trust`.
 The trust command accepts only a bundle of current public certificates that
-contains the installed old root and at least one additional root. It checks the
+contains the installed old root and at least one additional CA with certificate
+signing usage. It checks the
 installer owner, exact old CA hash and UID, ConfigMap resource version, and
 every API server and atelet workload UID, resource version, and Pod template.
 It updates the CA ConfigMap and the client Pod templates with Kubernetes
-resource-version checks, then waits for ready replacement Pods with new UIDs.
+resource-version checks, then waits for ready replacement Pods owned by the
+Deployment's ReplicaSet or the DaemonSet, with new UIDs.
 It writes a separate receipt without replacing the historical install record.
 
 An update error stops the command after a fresh read of the CA and client

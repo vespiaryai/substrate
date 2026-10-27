@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -28,13 +29,25 @@ func init() {
 	rotate := &cobra.Command{Use: "rotate", Short: "Rotate installer-owned resources"}
 	s3 := &cobra.Command{Use: "s3", Short: "Rotate the k3s S3 client trust and endpoint"}
 	var expectedPath, caPath, receiptPath string
+	var clients []string
 	inspect := &cobra.Command{Use: "inspect", Short: "Print the current S3 rotation identities as JSON", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		state, err := env.InspectS3Rotation(cmd.Context())
+		inventory := make([]steps.S3RotationClient, 0, len(clients))
+		for _, client := range clients {
+			name, uid, ok := strings.Cut(client, "=")
+			kind, name, kindOK := strings.Cut(name, "/")
+			if !ok || !kindOK || uid == "" || name == "" || (kind != "Deployment" && kind != "DaemonSet") {
+				return fmt.Errorf("invalid --client %q; use Deployment/name=UID or DaemonSet/name=UID", client)
+			}
+			inventory = append(inventory, steps.S3RotationClient{Kind: kind, Name: name, UID: uid})
+		}
+		state, err := env.InspectS3Rotation(cmd.Context(), inventory)
 		if err != nil {
 			return err
 		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(state)
 	}}
+	inspect.Flags().StringArrayVar(&clients, "client", nil, "Independently verified installed client Kind/name=UID; repeat for every client")
+	_ = inspect.MarkFlagRequired("client")
 	trust := &cobra.Command{Use: "trust", Short: "Stage old and new public S3 roots", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		data, err := os.ReadFile(expectedPath)
 		if err != nil {
