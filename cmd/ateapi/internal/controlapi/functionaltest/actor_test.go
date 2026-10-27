@@ -5156,6 +5156,42 @@ func TestMintActorJWT_Success(t *testing.T) {
 		t.Errorf("ate.dev.actorUID = %q, want the stored actor's %q", claims.Substrate.ActorUID, want)
 	}
 	assertActorJWTLifetime(t, mintResp, claims, 30*time.Minute)
+
+	ref := &ateapipb.ObjectRef{Atespace: testAtespace, Name: "id1"}
+	if _, err := tc.client.DeleteActor(t.Context(), &ateapipb.DeleteActorRequest{Actor: ref, AnyState: true}); err != nil {
+		t.Fatalf("DeleteActor before same-name recreation: %v", err)
+	}
+	recreated, err := tc.client.CreateActor(t.Context(), &ateapipb.CreateActorRequest{Actor: &ateapipb.Actor{
+		Metadata:      &ateapipb.ResourceMetadata{Atespace: testAtespace, Name: "id1"},
+		ActorTemplate: &ateapipb.ObjectRef{Atespace: testAtespace, Name: "tmpl1"},
+	}})
+	if err != nil {
+		t.Fatalf("CreateActor after deletion: %v", err)
+	}
+	if recreated.GetMetadata().GetUid() == createResp.GetMetadata().GetUid() {
+		t.Fatal("recreated Actor retained the old UID")
+	}
+	request := &ateapipb.MintActorJWTRequest{
+		Actor: ref, Audience: []string{"foo"}, ExpirationSeconds: 1800,
+		ExpectedActorUid: createResp.GetMetadata().GetUid(),
+	}
+	if _, err := tc.client.MintActorJWT(t.Context(), request); status.Code(err) != codes.Aborted {
+		t.Fatalf("old UID mint after recreation status = %v, want Aborted: %v", status.Code(err), err)
+	}
+	request.ExpectedActorUid = recreated.GetMetadata().GetUid()
+	replacementJWT, err := tc.client.MintActorJWT(t.Context(), request)
+	if err != nil {
+		t.Fatalf("new UID mint after recreation: %v", err)
+	}
+	segments = strings.Split(replacementJWT.GetActorJwt(), ".")
+	if len(segments) != 3 {
+		t.Fatalf("replacement actor JWT has %d segments, want 3", len(segments))
+	}
+	var replacementClaims actoridjwt.WireClaims
+	decodeJWTSegment(t, segments[1], &replacementClaims)
+	if got := replacementClaims.Substrate.ActorUID; got != recreated.GetMetadata().GetUid() {
+		t.Fatalf("replacement ate.dev.actorUID = %q, want %q", got, recreated.GetMetadata().GetUid())
+	}
 }
 
 // assertActorJWTLifetime checks that expires_at matches the exp claim and that
